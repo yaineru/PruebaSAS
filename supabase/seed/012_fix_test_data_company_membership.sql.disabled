@@ -1,0 +1,23 @@
+-- Fix Test Data Company Membership
+-- Purpose: Link specific user with specific company to enable RLS access to test data
+-- Created: 2026-06-12
+
+DO $$ 
+DECLARE
+  test_company_id UUID := 'ebed759d-53af-401b-b924-a4f72ceccd38'::UUID;
+  first_user_id UUID := 'c6a87304-ea9a-4ff9-9693-cc1382353380'::UUID;
+BEGIN
+  -- Update user to be part of test company with ADMIN role
+  UPDATE public.users 
+  SET 
+    company_id = test_company_id,
+    role = 'ADMIN'::public.app_role,
+    is_active = true
+  WHERE id = first_user_id;
+  
+  RAISE NOTICE 'User % linked to company % with ADMIN role', first_user_id, test_company_id;
+  RAISE NOTICE 'Company membership fix completed for company: %', test_company_id;
+END $$;
+
+SELECT '012_fix_test_data_company_membership completed' AS result;
+

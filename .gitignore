@@ -1,0 +1,60 @@
+# Environment / secrets
+.env
+.env*.local
+.env.production
+.env*
+!.env.example
+
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+next-env.d.ts.bak
+
+# Build / bundler output
+dist/
+build/
+coverage/
+.turbo/
+
+# Vercel
+.vercel
+
+# Supabase CLI local state
+.supabase/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs/
+
+# Local databases
+*.sqlite
+*.sqlite3
+*.db
+
+# TypeScript
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Generated report fallback files (local-dev-only Storage fallback; may
+# contain real customer data, see lib/actions/reports.ts)
+public/reports/
+
+# Tooling artifacts
+.playwright-mcp/
+.claude/scheduled_tasks.lock
+*.tmp
+*.temp

@@ -1,0 +1,116 @@
+-- Test Data Seed Migration
+-- Purpose: Create sample data for report generation testing
+-- Created: 2026-06-12
+
+-- Get current company and user IDs for testing
+DO $$ 
+DECLARE
+  test_company_id UUID := 'ebed759d-53af-401b-b924-a4f72ceccd38'::UUID;
+BEGIN
+  -- If company doesn't exist, this script will silently do nothing
+  IF test_company_id IS NULL THEN
+    RAISE NOTICE 'Invalid company ID. Skipping test data creation.';
+    RETURN;
+  END IF;
+  
+  -- Insert 10 test assets
+  INSERT INTO public.assets (
+    company_id, name, code, category, description, 
+    status, purchase_date, acquisition_cost, location, serial_number, brand, model
+  ) VALUES
+    (test_company_id, 'Laptop HP 15', 'ASSET-001', 'EQUIPMENT', 'Testing laptop', 'AVAILABLE'::public.asset_status, NOW()::DATE - INTERVAL '1 year', 1500, 'Oficina A', 'SN-HP-001', 'HP', '15-inch'),
+    (test_company_id, 'Monitor Dell 27"', 'ASSET-002', 'EQUIPMENT', 'Testing monitor', 'AVAILABLE'::public.asset_status, NOW()::DATE - INTERVAL '6 months', 350, 'Oficina A', 'SN-DELL-001', 'Dell', '27" UltraSharp'),
+    (test_company_id, 'Servidor HP ProLiant', 'ASSET-003', 'SERVER', 'Web server', 'AVAILABLE'::public.asset_status, NOW()::DATE - INTERVAL '2 years', 5000, 'Data Center', 'SN-SERVER-001', 'HP', 'ProLiant DL360'),
+    (test_company_id, 'Impresora Brother', 'ASSET-004', 'EQUIPMENT', 'Network printer', 'AVAILABLE'::public.asset_status, NOW()::DATE - INTERVAL '8 months', 800, 'Oficina B', 'SN-PRINTER-001', 'Brother', 'HL-L8360CDW'),
+    (test_company_id, 'Switch Cisco 48', 'ASSET-005', 'NETWORK', 'Network switch', 'AVAILABLE'::public.asset_status, NOW()::DATE - INTERVAL '3 years', 2000, 'Data Center', 'SN-SWITCH-001', 'Cisco', 'Catalyst 2960'),
+    (test_company_id, 'UPS APC 5000VA', 'ASSET-006', 'EQUIPMENT', 'Power backup', 'AVAILABLE'::public.asset_status, NOW()::DATE - INTERVAL '18 months', 3500, 'Data Center', 'SN-UPS-001', 'APC', 'Smart-UPS 5000VA'),
+    (test_company_id, 'Escritorio ergonómico', 'ASSET-007', 'FURNITURE', 'Desk for testing', 'AVAILABLE'::public.asset_status, NOW()::DATE - INTERVAL '6 months', 450, 'Oficina A', 'SN-DESK-001', 'Herman Miller', 'Aeron'),
+    (test_company_id, 'Silla de oficina', 'ASSET-008', 'FURNITURE', 'Office chair', 'AVAILABLE'::public.asset_status, NOW()::DATE - INTERVAL '1 year', 250, 'Oficina A', 'SN-CHAIR-001', 'Steelcase', 'Leap'),
+    (test_company_id, 'Cámara de seguridad', 'ASSET-009', 'SECURITY', 'IP camera', 'AVAILABLE'::public.asset_status, NOW()::DATE - INTERVAL '2 years', 600, 'Entrada', 'SN-CAM-001', 'Axis', 'M3004-V'),
+    (test_company_id, 'Control de acceso', 'ASSET-010', 'SECURITY', 'Access control system', 'AVAILABLE'::public.asset_status, NOW()::DATE - INTERVAL '1 year', 1200, 'Entrada', 'SN-ACCESS-001', 'HID', 'ProxPro 5355 AGP')
+  ON CONFLICT DO NOTHING;
+  
+  -- Insert 10 test maintenance records
+  INSERT INTO public.maintenance_records (
+    company_id, asset_id, title, type, description, 
+    cost, responsible_name, status, scheduled_at, completed_at
+  ) 
+  SELECT
+    test_company_id,
+    a.id,
+    'Maintenance: ' || a.name || ' (#' || (ROW_NUMBER() OVER ())::text || ')',
+    (CASE WHEN (ROW_NUMBER() OVER ()) % 3 = 1 THEN 'PREVENTIVE'
+           WHEN (ROW_NUMBER() OVER ()) % 3 = 2 THEN 'CORRECTIVE'
+           ELSE 'INSPECTION' END)::public.maintenance_type,
+    'Testing maintenance: ' || a.name,
+    ROUND((RANDOM() * 500 + 50)::numeric, 2),
+    'Technician ' || (ROW_NUMBER() OVER ())::text,
+    (CASE WHEN RANDOM() > 0.3 THEN 'COMPLETED' ELSE 'SCHEDULED' END)::public.maintenance_status,
+    NOW()::TIMESTAMPTZ + (RANDOM() * 30)::INTEGER * INTERVAL '1 day',
+    CASE WHEN RANDOM() > 0.3 THEN NOW() ELSE NULL END
+  FROM public.assets a
+  WHERE a.company_id = test_company_id
+  LIMIT 10
+  ON CONFLICT DO NOTHING;
+  
+  -- Insert 5 test projects
+  INSERT INTO public.projects (
+    company_id, name, description, status, 
+    start_date, due_date, budget
+  ) VALUES
+    (test_company_id, 'Implementación ERP', 'Proyecto de implementación del sistema ERP', 'ACTIVE'::public.project_status, NOW()::DATE - INTERVAL '3 months', NOW()::DATE + INTERVAL '3 months', 50000),
+    (test_company_id, 'Upgrade de servidores', 'Actualización de infraestructura', 'PLANNED'::public.project_status, NOW()::DATE + INTERVAL '1 month', NOW()::DATE + INTERVAL '4 months', 25000),
+    (test_company_id, 'Capacitación en seguridad', 'Programa de capacitación', 'ACTIVE'::public.project_status, NOW()::DATE - INTERVAL '2 months', NOW()::DATE + INTERVAL '1 month', 5000),
+    (test_company_id, 'Renovación de oficinas', 'Remodelación de espacios', 'COMPLETED'::public.project_status, NOW()::DATE - INTERVAL '12 months', NOW()::DATE - INTERVAL '3 months', 15000),
+    (test_company_id, 'Plan de continuidad', 'Plan de disaster recovery', 'PLANNED'::public.project_status, NOW()::DATE + INTERVAL '2 months', NOW()::DATE + INTERVAL '5 months', 8000)
+  ON CONFLICT DO NOTHING;
+  
+  -- Insert 10 test documents
+  INSERT INTO public.asset_documents (
+    company_id, asset_id, title, type, 
+    file_path, file_size, mime_type, expires_at
+  )
+  SELECT
+    test_company_id,
+    a.id,
+    'Document for ' || a.name || ' (' || (ROW_NUMBER() OVER ())::text || ')',
+    (CASE WHEN (ROW_NUMBER() OVER ()) % 5 = 1 THEN 'CERTIFICATE'
+           WHEN (ROW_NUMBER() OVER ()) % 5 = 2 THEN 'LICENSE'
+           WHEN (ROW_NUMBER() OVER ()) % 5 = 3 THEN 'MANUAL'
+           WHEN (ROW_NUMBER() OVER ()) % 5 = 4 THEN 'IMAGE'
+           ELSE 'OTHER' END)::public.document_type,
+    'documents/' || test_company_id::text || '/doc_' || (ROW_NUMBER() OVER ())::text || '.pdf',
+    ROUND((RANDOM() * 5000000 + 100000)::numeric, 0)::BIGINT,
+    'application/pdf',
+    NOW()::DATE + (RANDOM() * 730)::INTEGER
+  FROM public.assets a
+  WHERE a.company_id = test_company_id
+  LIMIT 10
+  ON CONFLICT DO NOTHING;
+  
+  -- Insert 10 test incidents
+  INSERT INTO public.incidents (
+    company_id, asset_id, title, description, 
+    priority, status, location, reported_at, resolved_at
+  )
+  SELECT
+    test_company_id,
+    a.id,
+    'Incidente: ' || a.name || ' #' || (ROW_NUMBER() OVER ())::text,
+    'Test incident description for asset: ' || a.name,
+    (CASE WHEN (ROW_NUMBER() OVER ()) % 3 = 1 THEN 'HIGH'
+           WHEN (ROW_NUMBER() OVER ()) % 3 = 2 THEN 'MEDIUM'
+           ELSE 'LOW' END)::public.incident_priority,
+    (CASE WHEN RANDOM() > 0.4 THEN 'RESUELTO' ELSE 'ABIERTO' END)::public.incident_status,
+    'Test Location',
+    NOW()::TIMESTAMPTZ - (RANDOM() * 30)::INTEGER * INTERVAL '1 day',
+    CASE WHEN RANDOM() > 0.4 THEN NOW() ELSE NULL END
+  FROM public.assets a
+  WHERE a.company_id = test_company_id
+  LIMIT 10
+  ON CONFLICT DO NOTHING;
+  
+  RAISE NOTICE 'Test data created successfully for company: %', test_company_id;
+END $$;
+
+SELECT '011_test_data_seed completed' AS result;

@@ -2,9 +2,10 @@
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Download, FileJson, FolderOpen, X } from 'lucide-react';
+import { Download, FileJson, FolderOpen, Mail, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { SendReportEmailModal } from '@/components/send-report-email-modal';
 
 type Props = {
   reportId: string;
@@ -22,6 +23,7 @@ type Props = {
  * Allows user to download immediately or view in history
  */
 export function ReportGeneratedModal({
+  reportId,
   fileName,
   downloadUrl,
   recordCount,
@@ -31,6 +33,7 @@ export function ReportGeneratedModal({
   open = true,
 }: Props) {
   const router = useRouter();
+  const [showEmailModal, setShowEmailModal] = useState(false);
 
   // Auto-download PDF if configured
   useEffect(() => {
@@ -116,7 +119,7 @@ export function ReportGeneratedModal({
           </div>
 
           {/* Action Buttons */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-2">
             <Button
               onClick={handleDownload}
               disabled={!downloadUrl}
@@ -125,6 +128,15 @@ export function ReportGeneratedModal({
             >
               <Download className="h-4 w-4" />
               Descargar
+            </Button>
+            <Button
+              onClick={() => setShowEmailModal(true)}
+              variant="outline"
+              className="gap-2"
+              size="sm"
+            >
+              <Mail className="h-4 w-4" />
+              Enviar
             </Button>
             <Button
               onClick={handleViewHistory}
@@ -143,6 +155,9 @@ export function ReportGeneratedModal({
           </p>
         </CardContent>
       </Card>
+      {showEmailModal && (
+        <SendReportEmailModal reportId={reportId} reportLabel={fileName} onClose={() => setShowEmailModal(false)} />
+      )}
     </div>
   );
 }

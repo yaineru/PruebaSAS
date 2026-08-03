@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Download, Trash2, Loader } from "lucide-react";
+import { Download, Trash2, Loader, Mail } from "lucide-react";
 import { createClient } from "@/lib/supabase/browser";
 import { formatDate } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { SendReportEmailModal } from "@/components/send-report-email-modal";
 import type { GeneratedReport } from "@/lib/reports";
 import { REPORT_ENTITY_LABELS } from "@/lib/reports/entity-labels";
 
@@ -35,6 +36,7 @@ export function ReportList({ companyId }: Props) {
   const [reports, setReports] = useState<GeneratedReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [emailingReport, setEmailingReport] = useState<GeneratedReport | null>(null);
 
   const supabase = createClient();
 
@@ -186,6 +188,11 @@ export function ReportList({ companyId }: Props) {
     }
   };
 
+  const getReportLabel = (report: GeneratedReport) =>
+    String(report.reportType) === "TECHNICAL_REPORT"
+      ? "Informe técnico"
+      : REPORT_ENTITY_LABELS[report.reportType as keyof typeof REPORT_ENTITY_LABELS] ?? String(report.reportType);
+
   const formatFileSize = (bytes: number | null) => {
     if (!bytes) return "-";
     if (bytes < 1024) return `${bytes} B`;
@@ -240,11 +247,7 @@ export function ReportList({ companyId }: Props) {
             <TableBody>
               {reports.map((report) => (
                 <TableRow key={report.id}>
-                  <TableCell className="font-medium">
-                    {String(report.reportType) === "TECHNICAL_REPORT"
-                      ? "Informe técnico"
-                      : REPORT_ENTITY_LABELS[report.reportType as keyof typeof REPORT_ENTITY_LABELS] ?? report.reportType}
-                  </TableCell>
+                  <TableCell className="font-medium">{getReportLabel(report)}</TableCell>
                   <TableCell>{report.fileFormat === "EXCEL" ? "Excel" : report.fileFormat}</TableCell>
                   <TableCell>{getStatusBadge(report.status)}</TableCell>
                   <TableCell className="text-right">{report.rowCount}</TableCell>
@@ -268,6 +271,14 @@ export function ReportList({ companyId }: Props) {
                           <Download className="mr-2 h-4 w-4" />
                           Descargar
                         </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setEmailingReport(report)}
+                        >
+                          <Mail className="mr-2 h-4 w-4" />
+                          Enviar por correo
+                        </Button>
                       </>
                     )}
                     {report.status === "FAILED" && (
@@ -288,6 +299,13 @@ export function ReportList({ companyId }: Props) {
           </Table>
         </div>
       </CardContent>
+      {emailingReport && (
+        <SendReportEmailModal
+          reportId={emailingReport.id}
+          reportLabel={`${getReportLabel(emailingReport)} (${emailingReport.fileFormat === "EXCEL" ? "Excel" : emailingReport.fileFormat})`}
+          onClose={() => setEmailingReport(null)}
+        />
+      )}
     </Card>
   );
 }

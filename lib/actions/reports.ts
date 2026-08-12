@@ -243,9 +243,7 @@ export async function generateReport(formData: FormData) {
       filters: filters,
       filters_applied: filters,
       file_size_bytes: null,
-      file_size: null,
       file_url: null,
-      url: null,
       generation_time_ms: null,
       error_message: null,
     };

@@ -8,12 +8,16 @@ import path from 'path';
 import { darkenHex, hexToRgb, resolveTemplateColorHex } from '@/lib/reports/color-palette';
 import { formatDateTime } from '@/lib/utils';
 
-/** Progrúas branding used as the default when a company hasn't set its own logo_url. */
-const DEFAULT_LOGO_PATH = '/branding/progruas-logo.png';
-const WATERMARK_PATH = '/branding/progruas-isotype.png';
-// Source isotype PNG is 660x648px - close to square, used to keep the
-// watermark's aspect ratio correct at any print size.
-const WATERMARK_ASPECT = 648 / 660;
+// Neutral EmpresaOS mark (public/icon.svg rasterized) used as the fallback
+// logo/watermark for ANY company that hasn't configured its own
+// company_settings.logo_url - including Progrúas itself, until it sets one.
+// Deliberately NOT a Progrúas asset: no company's branding should ever
+// appear on another company's report as a "global default" (see the RC1
+// multi-tenant branding audit). Per-company branding is driven entirely by
+// options.companyLogoUrl, resolved from that company's own company_settings
+// row (lib/actions/reports.ts, lib/actions/technical-reports.ts) - this path
+// is only reached when a tenant hasn't set one yet.
+const DEFAULT_LOGO_PATH = '/branding/empresaos-logo.png';
 
 /**
  * Every image ends up printed at most a few centimeters wide in the PDF
@@ -88,15 +92,37 @@ async function resolveImageAsBase64(source?: string | null): Promise<string | nu
 }
 
 /**
- * Draws the Progrúas isotype centered on the current page at very low
- * opacity, behind nothing (called after content, before the footer, since
- * jsPDF has no z-order/layers - "behind" just means drawn where it won't
- * overlap dense text). Restores full opacity afterward so the footer text
- * drawn right after this call isn't also faded.
+ * Reads width/height off a resolveImageAsBase64() data URI so the watermark
+ * can be drawn at the source image's real aspect ratio. That source is now
+ * per-company (the same logo used in the header, see callers below), not a
+ * fixed Progrúas asset, so a hardcoded ratio would distort other companies'
+ * logos.
  */
-function drawWatermark(doc: jsPDF, watermarkImage: string, pageWidth: number, pageHeight: number) {
+async function getImageAspect(dataUri: string | null): Promise<number> {
+  if (!dataUri) return 1;
+  const match = /^data:[^;]+;base64,(.*)$/.exec(dataUri);
+  if (!match) return 1;
+  try {
+    const metadata = await sharp(Buffer.from(match[1], 'base64')).metadata();
+    if (!metadata.width || !metadata.height) return 1;
+    return metadata.height / metadata.width;
+  } catch (error) {
+    console.warn('WATERMARK_ASPECT_READ_FAILED', { error: error instanceof Error ? error.message : String(error) });
+    return 1;
+  }
+}
+
+/**
+ * Draws the company's own logo (or the neutral EmpresaOS mark, see
+ * DEFAULT_LOGO_PATH) centered on the current page at very low opacity,
+ * behind nothing (called after content, before the footer, since jsPDF has
+ * no z-order/layers - "behind" just means drawn where it won't overlap
+ * dense text). Restores full opacity afterward so the footer text drawn
+ * right after this call isn't also faded.
+ */
+function drawWatermark(doc: jsPDF, watermarkImage: string, aspect: number, pageWidth: number, pageHeight: number) {
   const width = pageWidth * 0.5;
-  const height = width * WATERMARK_ASPECT;
+  const height = width * aspect;
   const x = (pageWidth - width) / 2;
   const y = (pageHeight - height) / 2;
   try {
@@ -400,11 +426,14 @@ export async function generatePdf(
     // Stamp the same footer (with per-page number) on every page, not just the
     // last one - table/section pagination above can produce several pages.
     const pageCount = (doc as { internal?: { getNumberOfPages?: () => number } }).internal?.getNumberOfPages?.() ?? 1;
-    const watermarkImage = await resolveImageAsBase64(WATERMARK_PATH);
+    // Same source as the header logo (this company's own logo, or the
+    // neutral EmpresaOS mark) - never a different, hardcoded company's asset.
+    const watermarkImage = logoImage;
+    const watermarkAspect = await getImageAspect(watermarkImage);
     for (let i = 1; i <= pageCount; i += 1) {
       doc.setPage(i);
       if (watermarkImage) {
-        drawWatermark(doc, watermarkImage, pageWidth, pageHeight);
+        drawWatermark(doc, watermarkImage, watermarkAspect, pageWidth, pageHeight);
       }
       doc.setDrawColor(203, 213, 225);
       doc.setLineWidth(0.4);
@@ -503,7 +532,7 @@ export async function generateTechnicalPdf(
 
     const evidenceItems = (reportData.evidenceItems || []).filter((item) => item.beforeUrl || item.afterUrl);
 
-    const [logoImage, technicianSignatureImage, clientSignatureImage, resolvedEvidence, watermarkImage] = await Promise.all([
+    const [logoImage, technicianSignatureImage, clientSignatureImage, resolvedEvidence] = await Promise.all([
       resolveImageAsBase64(options.companyLogoUrl || DEFAULT_LOGO_PATH),
       resolveImageAsBase64(reportData.technicalSignatureImage),
       resolveImageAsBase64(reportData.clientSignatureImage),
@@ -514,8 +543,11 @@ export async function generateTechnicalPdf(
           after: await resolveImageAsBase64(item.afterUrl),
         }))
       ),
-      resolveImageAsBase64(WATERMARK_PATH),
     ]);
+    // Same source as the header logo (this company's own logo, or the
+    // neutral EmpresaOS mark) - never a different, hardcoded company's asset.
+    const watermarkImage = logoImage;
+    const watermarkAspect = await getImageAspect(watermarkImage);
 
     const drawHeader = () => {
       doc.setFillColor(15, 23, 42);
@@ -558,7 +590,7 @@ export async function generateTechnicalPdf(
 
     const drawFooter = () => {
       if (watermarkImage) {
-        drawWatermark(doc, watermarkImage, pageWidth, pageHeight);
+        drawWatermark(doc, watermarkImage, watermarkAspect, pageWidth, pageHeight);
       }
       doc.setDrawColor(203, 213, 225);
       doc.setLineWidth(0.4);

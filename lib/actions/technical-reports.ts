@@ -306,7 +306,6 @@ export async function generateTechnicalReport(formData: FormData) {
       filters_applied: { maintenanceId: payload.maintenanceId, clientName: payload.clientName },
       file_size_bytes: pdfBuffer.length,
       file_url: finalDownloadUrl,
-      url: finalDownloadUrl,
       report_metadata: reportMetadata,
       evidence_items: evidenceItems,
       signatures,

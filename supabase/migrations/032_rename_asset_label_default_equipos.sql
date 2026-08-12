@@ -20,4 +20,3 @@ set asset_label = 'Equipos'
 where asset_label = 'Activos';
 
 select '032_rename_asset_label_default_equipos completed' as result;
-C:\Users\Yaine\CafeLindo\Carpeta\supabase\migrations\031_google_calendar_integration.sql

@@ -3,8 +3,6 @@
 import jsPDF, { GState } from 'jspdf';
 import ExcelJS from 'exceljs';
 import sharp from 'sharp';
-import { readFile } from 'fs/promises';
-import path from 'path';
 import { darkenHex, hexToRgb, resolveTemplateColorHex } from '@/lib/reports/color-palette';
 import { formatDateTime } from '@/lib/utils';
 
@@ -51,8 +49,17 @@ async function compressForEmbedding(buffer: Buffer, mime: string): Promise<{ buf
  * Resolves a logo/evidence/signature image reference to a base64 data URI
  * that jsPDF's addImage() can embed directly. jsPDF running in Node cannot
  * fetch a bare URL itself (that only works in a browser Image element), so
- * passing a raw Supabase Storage URL or a local "/evidence/..." path straight
+ * passing a raw Supabase Storage URL or a local "/branding/..." path straight
  * into addImage silently fails and falls back to the placeholder box.
+ *
+ * Local "/..." paths (e.g. DEFAULT_LOGO_PATH) are fetched over HTTP using
+ * APP_URL rather than read from disk with fs.readFile: on Vercel's
+ * serverless runtime, files under public/ are served by the CDN but aren't
+ * reliably reachable via the function's own filesystem at
+ * process.cwd()/public/... (works in `next dev`/`next start` locally,
+ * silently fails - caught below, falling back to the initials placeholder -
+ * in production). Fetching the deployment's own public URL works
+ * identically to fetching any other remote image.
  */
 async function resolveImageAsBase64(source?: string | null): Promise<string | null> {
   if (!source) return null;
@@ -64,21 +71,15 @@ async function resolveImageAsBase64(source?: string | null): Promise<string | nu
   }
 
   try {
-    let rawBuffer: Buffer;
-    let mime: string;
+    const isRemote = source.startsWith('http://') || source.startsWith('https://');
+    const fetchUrl = isRemote
+      ? source
+      : `${process.env.APP_URL || 'http://localhost:3000'}${source.startsWith('/') ? source : `/${source}`}`;
 
-    if (source.startsWith('http://') || source.startsWith('https://')) {
-      const response = await fetch(source);
-      if (!response.ok) return null;
-      mime = response.headers.get('content-type') || 'image/png';
-      rawBuffer = Buffer.from(await response.arrayBuffer());
-    } else {
-      const relativePath = source.startsWith('/') ? source.slice(1) : source;
-      const filePath = path.join(process.cwd(), 'public', relativePath);
-      rawBuffer = await readFile(filePath);
-      const ext = path.extname(filePath).toLowerCase();
-      mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
-    }
+    const response = await fetch(fetchUrl);
+    if (!response.ok) return null;
+    const mime = response.headers.get('content-type') || 'image/png';
+    const rawBuffer = Buffer.from(await response.arrayBuffer());
 
     const { buffer, mime: outMime } = await compressForEmbedding(rawBuffer, mime);
     return `data:${outMime};base64,${buffer.toString('base64')}`;

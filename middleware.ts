@@ -37,7 +37,14 @@ export async function middleware(request: NextRequest) {
 
   const isAuthRoute =
     request.nextUrl.pathname.startsWith("/login") ||
-    request.nextUrl.pathname.startsWith("/register");
+    request.nextUrl.pathname.startsWith("/register") ||
+    // Supabase invite/recovery links redirect here with the session tokens
+    // in the URL fragment (#access_token=...), which never reaches this
+    // middleware (fragments are client-only) - so at the point this request
+    // arrives there's no cookie yet and no way to know a session is coming.
+    // Treated the same as /login: unauthenticated visitors are let through,
+    // and an already-authenticated visitor is bounced to "/" below.
+    request.nextUrl.pathname.startsWith("/aceptar-invitacion");
   // /calendar/public/{token} is a deliberately unauthenticated availability
   // page (see app/calendar/public/[token]/page.tsx) - it must never bounce
   // to /login, and it isn't an "auth route" either (a logged-in visitor

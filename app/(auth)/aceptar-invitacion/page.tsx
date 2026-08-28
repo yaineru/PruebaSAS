@@ -9,7 +9,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-type Status = "checking" | "ready" | "invalid" | "expired" | "submitting" | "success" | "session_error";
+type Status =
+  | "checking"
+  | "ready"
+  | "invalid"
+  | "expired"
+  | "submitting"
+  | "success"
+  | "session_error"
+  | "code"
+  | "code_submitting";
 
 const MIN_PASSWORD_LENGTH = 6;
 
@@ -28,6 +37,9 @@ export default function AcceptInvitationPage() {
   const [formError, setFormError] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [codeEmail, setCodeEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [codeError, setCodeError] = useState("");
 
   useEffect(() => {
     async function consumeInviteFragment() {
@@ -69,6 +81,32 @@ export default function AcceptInvitationPage() {
 
     consumeInviteFragment();
   }, []);
+
+  async function handleCodeSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    setCodeError("");
+
+    if (!codeEmail || !code) {
+      setCodeError("Ingresa el correo y el código.");
+      return;
+    }
+
+    setStatus("code_submitting");
+    const supabase = createClient();
+    const { error } = await supabase.auth.verifyOtp({
+      email: codeEmail.trim(),
+      token: code.trim(),
+      type: "recovery"
+    });
+
+    if (error) {
+      setCodeError("El código no es válido o ya expiró. Pide uno nuevo.");
+      setStatus("code");
+      return;
+    }
+
+    setStatus("ready");
+  }
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -113,14 +151,32 @@ export default function AcceptInvitationPage() {
           )}
 
           {status === "invalid" && (
-            <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-              Este enlace no es válido o ya fue utilizado. Pide un nuevo enlace de invitación.
+            <div className="space-y-3">
+              <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                Este enlace no es válido o ya fue utilizado. Pide un nuevo enlace de invitación.
+              </div>
+              <button
+                type="button"
+                className="text-sm text-primary underline underline-offset-2"
+                onClick={() => setStatus("code")}
+              >
+                ¿Tienes un código en su lugar?
+              </button>
             </div>
           )}
 
           {status === "expired" && (
-            <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-              Este enlace expiró. Pide un nuevo enlace de invitación.
+            <div className="space-y-3">
+              <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                Este enlace expiró. Pide un nuevo enlace de invitación.
+              </div>
+              <button
+                type="button"
+                className="text-sm text-primary underline underline-offset-2"
+                onClick={() => setStatus("code")}
+              >
+                ¿Tienes un código en su lugar?
+              </button>
             </div>
           )}
 
@@ -128,6 +184,47 @@ export default function AcceptInvitationPage() {
             <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
               No se pudo validar tu sesión. Pide un nuevo enlace de invitación.
             </div>
+          )}
+
+          {(status === "code" || status === "code_submitting") && (
+            <form onSubmit={handleCodeSubmit} className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Ingresa el correo y el código de invitación que te compartieron.
+              </p>
+              <div className="space-y-2">
+                <Label htmlFor="code-email">Correo</Label>
+                <Input
+                  id="code-email"
+                  type="email"
+                  autoComplete="email"
+                  value={codeEmail}
+                  onChange={(e) => setCodeEmail(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="invite-code">Código</Label>
+                <Input
+                  id="invite-code"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  required
+                />
+              </div>
+
+              {codeError && (
+                <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                  {codeError}
+                </div>
+              )}
+
+              <Button type="submit" className="w-full" disabled={status === "code_submitting"}>
+                {status === "code_submitting" ? "Verificando..." : "Verificar código"}
+              </Button>
+            </form>
           )}
 
           {(status === "ready" || status === "submitting") && (

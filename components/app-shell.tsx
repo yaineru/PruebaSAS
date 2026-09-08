@@ -13,8 +13,7 @@ import {
   ShieldCheck
 } from "lucide-react";
 import { signOut } from "@/lib/actions/auth";
-import { modules } from "@/lib/modules";
-import { applyCompanySettings, getCompanySettings } from "@/lib/company-settings";
+import { getCompanySettings, getVisibleModules } from "@/lib/company-settings";
 import { Button } from "@/components/ui/button";
 import { getTenantContext } from "@/lib/tenant";
 import { NotificationBell } from "@/components/notification-bell";
@@ -22,7 +21,7 @@ import { NotificationBell } from "@/components/notification-bell";
 export async function AppShell({ children }: { children: React.ReactNode }) {
   const tenant = await getTenantContext();
   const settings = await getCompanySettings(tenant.companyId, tenant.companyName);
-  const visibleModules = modules.map((module) => applyCompanySettings(module, settings));
+  const visibleModules = getVisibleModules(settings);
   const mobileItems = visibleModules.slice(0, 6).map((module) => ({ 
     href: module.href, 
     label: module.title.slice(0, 8), 

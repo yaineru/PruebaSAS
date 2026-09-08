@@ -1,7 +1,8 @@
 import "server-only";
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
-import type { ModuleConfig } from "@/lib/modules";
+import { modules, type ModuleConfig } from "@/lib/modules";
+import { getNicheConfig } from "@/lib/niches";
 
 export type CompanySettings = {
   companyId: string;
@@ -82,6 +83,20 @@ export function getBusinessLabels(settings: CompanySettings): BusinessLabels {
     projectLabel: settings.projectLabel,
     incidentLabel: settings.incidentLabel
   };
+}
+
+// Punto único que decide qué módulos (de los 8 existentes) se muestran para
+// esta empresa, ya con las labels de company_settings aplicadas. Sidebar,
+// navegación móvil y dashboard deben resolver todos contra esta misma
+// función para que ninguna pantalla oculte un módulo mientras otra lo sigue
+// mostrando.
+export function getVisibleModules(settings: CompanySettings): ModuleConfig[] {
+  const niche = getNicheConfig(settings.businessType);
+  const effectiveSettings = niche.labels ? { ...settings, ...niche.labels } : settings;
+
+  return modules
+    .filter((module) => niche.visibleModules.includes(module.key))
+    .map((module) => applyCompanySettings(module, effectiveSettings));
 }
 
 export function applyCompanySettings(module: ModuleConfig, settings: CompanySettings): ModuleConfig {

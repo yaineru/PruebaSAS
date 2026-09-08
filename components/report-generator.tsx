@@ -26,6 +26,11 @@ type Props = {
     projectLabel: string;
     incidentLabel: string;
   };
+  // Qué tipos de informe ofrecer, resuelto por el nicho de la empresa
+  // (ver lib/niches.ts + app/(app)/informes/generar/page.tsx). Por defecto
+  // se muestran los 5 tipos actuales, igual que hoy, para no romper a nadie
+  // que use este componente sin pasar la prop.
+  visibleEntities?: ReportEntity[];
 };
 
 type FormState = {
@@ -40,14 +45,6 @@ type FormState = {
   format?: string;
 };
 
-const REPORT_TYPES: Array<{ value: ReportEntity; label: string; description: string }> = [
-  { value: "ASSETS", label: "Equipos", description: "Inventario y estado de equipos" },
-  { value: "MAINTENANCE", label: "Mantenimientos", description: "Registro de mantenimientos realizados" },
-  { value: "INCIDENTS", label: "Novedades", description: "Incidentes y problemas reportados" },
-  { value: "PROJECTS", label: "Proyectos", description: "Estado y progreso de proyectos" },
-  { value: "DOCUMENTS", label: "Documentos", description: "Documentos vencidos o próximos a vencer" }
-];
-
 const defaultLabels = {
   assetLabel: "Equipos",
   maintenanceLabel: "Mantenimientos",
@@ -55,7 +52,23 @@ const defaultLabels = {
   incidentLabel: "Novedades"
 };
 
-export function ReportGenerator({ templates = [], businessLabels = defaultLabels }: Props) {
+const ALL_REPORT_ENTITIES: ReportEntity[] = ["ASSETS", "MAINTENANCE", "INCIDENTS", "PROJECTS", "DOCUMENTS"];
+
+function buildReportTypes(
+  labels: Props["businessLabels"]
+): Array<{ value: ReportEntity; label: string; description: string }> {
+  const l = labels ?? defaultLabels;
+  return [
+    { value: "ASSETS", label: l.assetLabel, description: `Inventario y estado de ${l.assetLabel.toLowerCase()}` },
+    { value: "MAINTENANCE", label: l.maintenanceLabel, description: `Registro de ${l.maintenanceLabel.toLowerCase()} realizados` },
+    { value: "INCIDENTS", label: l.incidentLabel, description: `Incidentes y problemas reportados` },
+    { value: "PROJECTS", label: l.projectLabel, description: `Estado y progreso de ${l.projectLabel.toLowerCase()}` },
+    { value: "DOCUMENTS", label: "Documentos", description: "Documentos vencidos o próximos a vencer" }
+  ];
+}
+
+export function ReportGenerator({ templates = [], businessLabels = defaultLabels, visibleEntities = ALL_REPORT_ENTITIES }: Props) {
+  const REPORT_TYPES = buildReportTypes(businessLabels).filter((type) => visibleEntities.includes(type.value));
   const [state, setState] = useState<FormState>({ success: false });
   const [isPending, setIsPending] = useState(false);
   const [selectedReportType, setSelectedReportType] = useState<ReportEntity | null>(null);

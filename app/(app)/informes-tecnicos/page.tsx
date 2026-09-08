@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
 import { getTenantContext } from "@/lib/tenant";
+import { getCompanySettings } from "@/lib/company-settings";
+import { isModuleVisible } from "@/lib/niches";
 import { TechnicalReportForm } from "@/components/technical-report-form";
 
 export const metadata = {
@@ -11,6 +13,14 @@ export default async function TechnicalReportsPage() {
 
   if (!['ADMIN', 'SUPERVISOR', 'OPERARIO'].includes(tenant.role)) {
     redirect('/');
+  }
+
+  // Módulo oculto del sidebar para el nicho no debe seguir accesible por URL
+  // directa (ver components/module-page.tsx para el mismo guard en los
+  // módulos genéricos).
+  const settings = await getCompanySettings(tenant.companyId, tenant.companyName);
+  if (!isModuleVisible(settings.businessType, "technical_reports")) {
+    redirect("/");
   }
 
   return (

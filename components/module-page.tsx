@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import type { ModuleConfig, ModuleField } from "@/lib/modules";
 import { applyCompanySettings, getCompanySettings } from "@/lib/company-settings";
+import { isModuleVisible } from "@/lib/niches";
 import { getEnumLabel } from "@/lib/enums";
 import { createClient } from "@/lib/supabase/server";
 import { formatDate } from "@/lib/utils";
@@ -38,6 +40,16 @@ export async function ModulePage({
 }) {
   const tenant = await getTenantContext();
   const settings = await getCompanySettings(tenant.companyId, tenant.companyName);
+
+  // Ocultar el módulo del menú no basta como autorización: alguien podría
+  // seguir entrando por URL directa (ej. /proyectos en una veterinaria).
+  // Mismo registro central que decide el sidebar (lib/niches.ts) decide esto.
+  // El aislamiento de datos entre empresas sigue dependiendo de RLS, no de
+  // este guard - esto es solo la capa de experiencia/autorización funcional.
+  if (!isModuleVisible(settings.businessType, module.key)) {
+    redirect("/");
+  }
+
   const visibleModule = await withRelationOptions(applyCompanySettings(module, settings), tenant.companyId);
   let rows: TenantRow[] = [];
   let listError: string | null = null;

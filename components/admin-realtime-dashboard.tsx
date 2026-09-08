@@ -15,6 +15,7 @@ import {
 import { createClient } from "@/lib/supabase/browser";
 import type { BusinessLabels } from "@/lib/company-settings";
 import type { DashboardData, DashboardMetricKey } from "@/lib/dashboard";
+import type { ModuleKey } from "@/lib/modules";
 import { getEnumLabel } from "@/lib/enums";
 import { formatDate } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -29,9 +30,14 @@ type Props = {
   companyName: string;
   labels: BusinessLabels;
   initialData: DashboardData;
+  // Módulos visibles para el nicho de esta empresa (lib/niches.ts), resuelto
+  // en el server component padre. Decide qué tarjetas del dashboard mostrar,
+  // igual registro que ya decide el sidebar - así ninguna pantalla oculta un
+  // módulo mientras otra lo sigue mostrando.
+  visibleModules: ModuleKey[];
 };
 
-function actionText(action: string, table: string) {
+function actionText(action: string, table: string, labels: BusinessLabels) {
   const verbs: Record<string, string> = {
     INSERT: "creó",
     UPDATE: "actualizó",
@@ -40,12 +46,15 @@ function actionText(action: string, table: string) {
     LOGOUT: "cerró sesión",
     PERMISSION_DENIED: "tuvo un intento denegado"
   };
+  // assets/maintenance_records/incidents/projects usan la terminología ya
+  // resuelta para este tenant (labels), en vez de sustantivos fijos de
+  // maquinaria ("maquinaria", "obra") que no aplican a otros nichos.
   const tables: Record<string, string> = {
-    assets: "maquinaria",
-    maintenance_records: "mantenimiento",
+    assets: labels.assetLabel.toLowerCase(),
+    maintenance_records: labels.maintenanceLabel.toLowerCase(),
     asset_documents: "documento",
-    incidents: "novedad",
-    projects: "obra",
+    incidents: labels.incidentLabel.toLowerCase(),
+    projects: labels.projectLabel.toLowerCase(),
     users: "usuario",
     asset_assignments: "asignacion",
     activities: "actividad",
@@ -63,7 +72,24 @@ function actionText(action: string, table: string) {
   return `${verbs[action] ?? "registro actividad en"} ${tables[table] ?? table}`;
 }
 
-export function AdminRealtimeDashboard({ companyId, companyName, labels, initialData }: Props) {
+function joinWithY(parts: string[]): string {
+  if (parts.length === 0) return "tu operación";
+  if (parts.length === 1) return parts[0];
+  return `${parts.slice(0, -1).join(", ")} y ${parts[parts.length - 1]}`;
+}
+
+const METRIC_MODULE: Record<DashboardMetricKey, ModuleKey> = {
+  totalAssets: "assets",
+  availableAssets: "assets",
+  assetsInMaintenance: "assets",
+  openIncidents: "incidents",
+  activeProjects: "projects",
+  upcomingMaintenance: "maintenance_records",
+  expiringDocuments: "asset_documents",
+  activeUsers: "users"
+};
+
+export function AdminRealtimeDashboard({ companyId, companyName, labels, initialData, visibleModules }: Props) {
   const [data, setData] = useState(initialData);
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const supabase = useMemo(() => createClient(), []);
@@ -245,7 +271,7 @@ export function AdminRealtimeDashboard({ companyId, companyName, labels, initial
   const incidentRows = data.incidentRows ?? [];
   const alertRows = data.alertRows ?? [];
   const recentActivity = data.recentActivity ?? [];
-  const metricConfig: Array<{ key: DashboardMetricKey; label: string; icon: typeof Boxes }> = [
+  const allMetricConfig: Array<{ key: DashboardMetricKey; label: string; icon: typeof Boxes }> = [
     { key: "totalAssets", label: `${labels.assetLabel} totales`, icon: Boxes },
     { key: "availableAssets", label: "Disponibles", icon: PackageCheck },
     { key: "assetsInMaintenance", label: "En seguimiento", icon: Wrench },
@@ -255,6 +281,18 @@ export function AdminRealtimeDashboard({ companyId, companyName, labels, initial
     { key: "expiringDocuments", label: "Documentos por vencer", icon: FileWarning },
     { key: "activeUsers", label: "Usuarios activos", icon: UsersRound }
   ];
+  // No mostrar una tarjeta (ni un contador en 0) de un módulo que el nicho de
+  // esta empresa oculta - ej. "Proyectos activos" no debe aparecer para una
+  // veterinaria si Obras está oculto en el sidebar.
+  const metricConfig = allMetricConfig.filter((metric) => visibleModules.includes(METRIC_MODULE[metric.key]));
+  const showMaintenance = visibleModules.includes("maintenance_records");
+  const showIncidents = visibleModules.includes("incidents");
+  const summaryParts = [
+    visibleModules.includes("assets") && labels.assetLabel.toLowerCase(),
+    visibleModules.includes("projects") && labels.projectLabel.toLowerCase(),
+    visibleModules.includes("asset_documents") && "documentos",
+    visibleModules.includes("incidents") && labels.incidentLabel.toLowerCase()
+  ].filter((part): part is string => Boolean(part));
 
   return (
     <div className="space-y-6 pb-20 lg:pb-0">
@@ -271,7 +309,7 @@ export function AdminRealtimeDashboard({ companyId, companyName, labels, initial
               Panel general de {companyName}
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-muted-foreground sm:text-base">
-              Indicadores ejecutivos de {labels.assetLabel.toLowerCase()}, {labels.projectLabel.toLowerCase()}, documentos y {labels.incidentLabel.toLowerCase()}.
+              Indicadores ejecutivos de {joinWithY(summaryParts)}.
             </p>
           </div>
           <Activity className="hidden h-12 w-12 text-primary lg:block" />
@@ -301,23 +339,25 @@ export function AdminRealtimeDashboard({ companyId, companyName, labels, initial
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
-        <Card>
-          <CardHeader>
-            <CardTitle>{labels.maintenanceLabel} próximos</CardTitle>
-            <CardDescription>Actividades ordenadas por fecha comprometida.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveTable
-              empty={`No hay ${labels.maintenanceLabel.toLowerCase()} próximos.`}
-              rows={upcomingRows}
-              columns={[
-                { label: "Actividad", render: (row) => <span className="font-medium">{row.title}</span> },
-                { label: "Fecha", render: (row) => formatDate(row.due_date) },
-                { label: "Estado", render: (row) => <Badge variant="secondary">{getEnumLabel("maintenanceStatus", row.status)}</Badge> }
-              ]}
-            />
-          </CardContent>
-        </Card>
+        {showMaintenance ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>{labels.maintenanceLabel} próximos</CardTitle>
+              <CardDescription>Actividades ordenadas por fecha comprometida.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveTable
+                empty={`No hay ${labels.maintenanceLabel.toLowerCase()} próximos.`}
+                rows={upcomingRows}
+                columns={[
+                  { label: "Actividad", render: (row) => <span className="font-medium">{row.title}</span> },
+                  { label: "Fecha", render: (row) => formatDate(row.due_date) },
+                  { label: "Estado", render: (row) => <Badge variant="secondary">{getEnumLabel("maintenanceStatus", row.status)}</Badge> }
+                ]}
+              />
+            </CardContent>
+          </Card>
+        ) : null}
 
         <Card>
           <CardHeader>
@@ -333,7 +373,7 @@ export function AdminRealtimeDashboard({ companyId, companyName, labels, initial
               recentActivity.map((item) => (
                 <div className="rounded-md border p-3" key={item.id}>
                   <p className="text-sm font-medium">
-                    {item.users?.full_name ?? item.users?.email ?? "Sistema"} {actionText(item.action, item.table_name)}
+                    {item.users?.full_name ?? item.users?.email ?? "Sistema"} {actionText(item.action, item.table_name, labels)}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">{formatDate(item.created_at)}</p>
                 </div>
@@ -344,23 +384,25 @@ export function AdminRealtimeDashboard({ companyId, companyName, labels, initial
       </section>
 
       <section className="grid gap-6 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>{labels.incidentLabel} recientes</CardTitle>
-            <CardDescription>Seguimiento de reportes abiertos o en proceso.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveTable
-              empty={`No hay ${labels.incidentLabel.toLowerCase()} recientes.`}
-              rows={incidentRows}
-              columns={[
-                { label: "Registro", render: (row) => <span className="font-medium">{row.title}</span> },
-                { label: "Prioridad", render: (row) => <Badge variant={row.priority === "Critica" ? "destructive" : "warning"}>{row.priority}</Badge> },
-                { label: "Estado", render: (row) => row.status }
-              ]}
-            />
-          </CardContent>
-        </Card>
+        {showIncidents ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>{labels.incidentLabel} recientes</CardTitle>
+              <CardDescription>Seguimiento de reportes abiertos o en proceso.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveTable
+                empty={`No hay ${labels.incidentLabel.toLowerCase()} recientes.`}
+                rows={incidentRows}
+                columns={[
+                  { label: "Registro", render: (row) => <span className="font-medium">{row.title}</span> },
+                  { label: "Prioridad", render: (row) => <Badge variant={row.priority === "Critica" ? "destructive" : "warning"}>{row.priority}</Badge> },
+                  { label: "Estado", render: (row) => row.status }
+                ]}
+              />
+            </CardContent>
+          </Card>
+        ) : null}
 
         <Card>
           <CardHeader>

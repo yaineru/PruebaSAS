@@ -1,6 +1,7 @@
 import { AdminRealtimeDashboard } from "@/components/admin-realtime-dashboard";
 import { getBusinessLabels, getCompanySettings } from "@/lib/company-settings";
 import { getAdminDashboardData } from "@/lib/dashboard";
+import { getNicheConfig } from "@/lib/niches";
 import { getTenantContext } from "@/lib/tenant";
 
 export default async function DashboardPage() {
@@ -14,6 +15,7 @@ export default async function DashboardPage() {
       companyName={settings.companyName}
       labels={getBusinessLabels(settings)}
       initialData={initialData}
+      visibleModules={getNicheConfig(settings.businessType).visibleModules}
     />
   );
 }

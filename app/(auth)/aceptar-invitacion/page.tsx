@@ -142,7 +142,10 @@ export default function AcceptInvitationPage() {
           <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
             <Building2 className="h-5 w-5" />
           </div>
-          <CardTitle>Bienvenido a Progrúas</CardTitle>
+          {/* Pantalla compartida por todos los tenants (se abre antes de que
+              exista sesión/empresa resuelta) - nunca debe mostrar el nombre
+              de una empresa específica, ver auditoría de nichos 2026-09-07. */}
+          <CardTitle>Bienvenido a EmpresaOS</CardTitle>
           <CardDescription>Configura tu contraseña para comenzar a utilizar la plataforma.</CardDescription>
         </CardHeader>
         <CardContent>

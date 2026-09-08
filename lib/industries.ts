@@ -33,10 +33,13 @@ export const INDUSTRY_SLUGS: Record<IndustrySlug, IndustryTemplate> = {
     slug: "machinery",
     description: "Gestión de maquinaria industrial, herramientas y equipos pesados",
     icon: "⚙️",
-    assetLabel: "Máquinas",
+    // Alineado a la terminología real del único tenant machinery (Progrúas
+    // S.A.S.): "Equipos"/"Novedades", no los placeholders "Máquinas"/"Alertas"
+    // que nunca se usaron (ver 040_link_industry_template_to_signup.sql).
+    assetLabel: "Equipos",
     maintenanceLabel: "Mantenimientos",
     projectLabel: "Proyectos",
-    incidentLabel: "Alertas",
+    incidentLabel: "Novedades",
     suggestedColorPrimary: "#1e40af",
     suggestedColorSecondary: "#f59e0b",
     isActive: true,
@@ -65,7 +68,10 @@ export const INDUSTRY_SLUGS: Record<IndustrySlug, IndustryTemplate> = {
     slug: "veterinary",
     description: "Gestión de clínica veterinaria, pacientes y procedimientos",
     icon: "🐾",
-    assetLabel: "Equipos",
+    // No "Equipos" (eso sería confundir equipo clínico con mascotas/pacientes,
+    // que todavía no existen como entidad propia). "Equipo clínico" se refiere
+    // a ecógrafos, autoclaves, rayos X: equipo real que una clínica mantiene.
+    assetLabel: "Equipo clínico",
     maintenanceLabel: "Mantenimiento",
     projectLabel: "Campañas",
     incidentLabel: "Consultas",
@@ -180,4 +186,14 @@ export function getIndustryTemplate(slug: IndustrySlug): IndustryTemplate {
 
 export function getAllIndustries(): IndustryTemplate[] {
   return Object.values(INDUSTRY_SLUGS);
+}
+
+// Usado por registerAccount (lib/actions/auth.ts) para no reenviar valores
+// arbitrarios a Supabase Auth metadata. La validación real y definitiva vive
+// en el trigger de la BD (handle_new_auth_user, ver
+// 040_link_industry_template_to_signup.sql), que solo aplica un template si
+// el slug coincide con una fila activa de industry_templates - esto es
+// defensa en profundidad en la capa de aplicación, no la fuente de verdad.
+export function isValidIndustrySlug(value: string): value is IndustrySlug {
+  return Object.prototype.hasOwnProperty.call(INDUSTRY_SLUGS, value);
 }

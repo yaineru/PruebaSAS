@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
+import * as Sentry from "@sentry/nextjs";
 import { Button } from "@/components/ui/button";
 
 export default function AppError({
@@ -16,6 +17,10 @@ export default function AppError({
       message: error.message,
       digest: error.digest
     });
+    // Antes de esto, un error real de producción solo se veía en la consola
+    // del navegador del usuario - nadie del lado del operador se enteraba.
+    // No-op si SENTRY_DSN no está configurado (ver instrumentation-client.ts).
+    Sentry.captureException(error);
   }, [error]);
 
   return (

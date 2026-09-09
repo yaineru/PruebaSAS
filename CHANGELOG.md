@@ -2,6 +2,29 @@
 
 Todas las fechas usan zona horaria de Colombia. Formato basado en [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.1.0] - 2026-09-09
+
+Misión de pre-lanzamiento comercial: auditoría completa seguida de corrección real de todo lo que bloqueaba empezar a captar clientes desde tráfico público (TikTok). Progrúas S.A.S. (nicho `machinery`) queda sin ningún cambio de comportamiento — ver la suite de pruebas nueva.
+
+### Añadido
+- Landing pública en `/` (antes esa ruta era el dashboard protegido) con propuesta de valor, funcionalidades reales, pasos para empezar y contacto de soporte. El dashboard se movió a `/dashboard`.
+- Páginas legales mínimas `/privacidad` y `/terminos`, enlazadas desde la landing, el registro y el login. Datos de la razón social y contacto de soporte centralizados como placeholders explícitos en `lib/site-config.ts`, pendientes de completar con la información real.
+- SEO básico: metadata Open Graph/Twitter, `robots.ts`, `sitemap.ts`.
+- Monitoreo de errores de producción con Sentry (servidor, edge y navegador), inactivo hasta configurar `SENTRY_DSN`/`NEXT_PUBLIC_SENTRY_DSN`.
+- Panel `/super-admin/empresas`: listado mínimo de empresas registradas (nicho, administrador, usuarios, fecha, estado) con acción de suspender/reactivar.
+- Aplicación real de `companies.status`: una empresa suspendida pierde el acceso de inmediato (antes la columna existía pero no se consultaba en ningún lado).
+- Límite de intentos (rate limiting) respaldado en base de datos (`check_rate_limit()`, migración `042`) en vez de un `Map` en memoria que no sobrevivía el modelo serverless de Vercel.
+- Suite mínima de pruebas automatizadas (Vitest) para el sistema de nichos, la matriz de permisos por rol y la disponibilidad de industrias en el registro — antes no existía ninguna prueba automatizada en el proyecto.
+- El selector de industria en el registro marca "Próximamente" los nichos que todavía no son una experiencia terminada (todos salvo `machinery` y el nuevo `general`), en vez de ofrecerlos como si ya funcionaran igual de bien.
+
+### Corregido
+- **Bloqueador de seguridad:** `generateReport` y `sendReportByEmail` no verificaban el rol del usuario — un OPERARIO podía generar y enviar informes de la empresa aunque la interfaz y el manual dijeran que no podía.
+- **Bloqueador de seguridad:** dependencia crítica de Next.js con una vulnerabilidad de ejecución remota de código no autenticada — actualizada sin cambios rompedores.
+- Eliminar un informe, un activo, un mantenimiento o una novedad podía responder "eliminado" aunque la base de datos hubiera rechazado la operación en silencio por permisos insuficientes (RLS más estricto que la aplicación) — ambas capas ahora coinciden y la respuesta refleja lo que realmente pasó.
+
+### Documentación
+- Manual de usuario de Progrúas corregido: la matriz de permisos por rol (quién puede eliminar equipos, mantenimientos, novedades y documentos) no coincidía con las políticas reales de la base de datos.
+
 ## [1.0.0] - 2026-08-03
 
 Primera versión estable de EmpresaOS, certificada como Release Candidate y aprobada para entrega comercial a Progrúas S.A.S.
@@ -46,3 +69,5 @@ Primera versión estable de EmpresaOS, certificada como Release Candidate y apro
 ## Migraciones aplicadas hasta esta versión
 
 `001` a `038`. Las migraciones `036` y `038` corrigen datos de enum corrompidos en la base de datos viva y ya fueron confirmadas como aplicadas correctamente contra la base de datos de producción.
+
+**Pendiente de ejecutar en Supabase (SQL Editor) para esta versión [1.1.0]:** `039` a `042`, en orden. La `042` (`rate_limits` + `check_rate_limit()`) es la única nueva de esta sesión — sin aplicarla, el rate limiting sigue funcionando con el respaldo en memoria anterior (ver `lib/security.ts`), no falla, pero no es efectivo entre instancias de Vercel hasta que se aplique.

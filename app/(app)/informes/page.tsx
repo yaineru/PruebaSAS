@@ -15,7 +15,7 @@ export default async function ReportsPage() {
 
   // Only authenticated users can view reports
   if (!["ADMIN", "SUPERVISOR", "OPERARIO"].includes(tenant.role)) {
-    redirect("/");
+    redirect("/dashboard");
   }
 
   return (

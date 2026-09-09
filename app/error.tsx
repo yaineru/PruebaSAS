@@ -28,7 +28,7 @@ export default function AppError({
         <div className="mt-6 flex flex-col gap-3 sm:flex-row">
           <Button onClick={reset}>Reintentar</Button>
           <Button asChild variant="outline">
-            <Link href="/">Ir al dashboard</Link>
+            <Link href="/dashboard">Ir al dashboard</Link>
           </Button>
         </div>
       </div>

@@ -49,7 +49,7 @@ export async function signIn(formData: FormData) {
   if (error) redirect("/login?error=Credenciales%20inv%C3%A1lidas");
 
   await trackAnalyticsEvent("LOGIN");
-  redirect("/");
+  redirect("/dashboard");
 }
 
 export async function registerAccount(

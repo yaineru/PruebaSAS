@@ -47,7 +47,7 @@ export async function ModulePage({
   // El aislamiento de datos entre empresas sigue dependiendo de RLS, no de
   // este guard - esto es solo la capa de experiencia/autorización funcional.
   if (!isModuleVisible(settings.businessType, module.key)) {
-    redirect("/");
+    redirect("/dashboard");
   }
 
   const visibleModule = await withRelationOptions(applyCompanySettings(module, settings), tenant.companyId);

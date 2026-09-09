@@ -30,7 +30,7 @@ export default async function GenerateReportPage() {
 
   // Only ADMIN and SUPERVISOR can generate reports
   if (!["ADMIN", "SUPERVISOR"].includes(tenant.role)) {
-    redirect("/");
+    redirect("/dashboard");
   }
 
   const settings = await getCompanySettings(tenant.companyId, tenant.companyName);

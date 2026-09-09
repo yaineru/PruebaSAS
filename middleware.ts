@@ -49,8 +49,16 @@ export async function middleware(request: NextRequest) {
   // page (see app/calendar/public/[token]/page.tsx) - it must never bounce
   // to /login, and it isn't an "auth route" either (a logged-in visitor
   // opening someone else's share link should still see the public page, not
-  // get redirected back to "/").
-  const isPublicRoute = request.nextUrl.pathname.startsWith("/calendar/public");
+  // get redirected back to the dashboard).
+  // "/" is the public marketing landing (app/page.tsx) - the actual app now
+  // lives at "/dashboard". /privacidad and /terminos are the minimum legal
+  // pages, linked from the landing/register footer, and must be readable by
+  // an anonymous visitor before they ever sign up.
+  const isPublicRoute =
+    request.nextUrl.pathname === "/" ||
+    request.nextUrl.pathname.startsWith("/calendar/public") ||
+    request.nextUrl.pathname === "/privacidad" ||
+    request.nextUrl.pathname === "/terminos";
   const isAppRoute = !isAuthRoute && !isPublicRoute && !request.nextUrl.pathname.startsWith("/api");
 
   if (!user && isAppRoute) {
@@ -59,9 +67,12 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  if (user && isAuthRoute) {
+  // Un visitante ya autenticado que llega a /login, /register o a la landing
+  // pública ("/") va directo al panel en vez de ver el formulario de acceso
+  // o la propuesta de venta de nuevo.
+  if (user && (isAuthRoute || request.nextUrl.pathname === "/")) {
     const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/";
+    redirectUrl.pathname = "/dashboard";
     return NextResponse.redirect(redirectUrl);
   }
 

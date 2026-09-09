@@ -67,6 +67,16 @@ export default function LoginPage({
               </p>
             </CardContent>
           </Card>
+
+          <p className="text-center text-xs text-muted-foreground">
+            <Link className="underline hover:text-foreground" href="/terminos">
+              Términos
+            </Link>{" "}
+            ·{" "}
+            <Link className="underline hover:text-foreground" href="/privacidad">
+              Privacidad
+            </Link>
+          </p>
         </div>
       </section>
     </main>

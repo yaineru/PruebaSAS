@@ -54,6 +54,18 @@ export default function RegisterPage({
               </p>
             </CardContent>
           </Card>
+
+          <p className="text-center text-xs text-muted-foreground">
+            Al crear una cuenta aceptas nuestros{" "}
+            <Link className="underline hover:text-foreground" href="/terminos">
+              términos
+            </Link>{" "}
+            y nuestra{" "}
+            <Link className="underline hover:text-foreground" href="/privacidad">
+              política de privacidad
+            </Link>
+            .
+          </p>
         </div>
       </section>
     </main>

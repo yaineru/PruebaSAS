@@ -46,7 +46,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <nav className="flex gap-2 overflow-x-auto px-4 pb-3">
-          <Link className="shrink-0 rounded-md border px-3 py-2 text-sm" href="/">
+          <Link className="shrink-0 rounded-md border px-3 py-2 text-sm" href="/dashboard">
             Panel general
           </Link>
           {visibleModules.map((item) => (
@@ -60,7 +60,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-72 border-r bg-card lg:block">
         <div className="flex h-full flex-col">
           <div className="border-b p-5">
-            <Link href="/" className="flex items-center gap-3">
+            <Link href="/dashboard" className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
                 <Building2 className="h-5 w-5" />
               </div>
@@ -71,7 +71,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
             </Link>
           </div>
           <nav className="flex-1 space-y-1 p-3">
-            <Link className="block rounded-md px-3 py-2 text-sm font-medium hover:bg-muted" href="/">
+            <Link className="block rounded-md px-3 py-2 text-sm font-medium hover:bg-muted" href="/dashboard">
               Panel general
             </Link>
             {visibleModules.map((item) => (

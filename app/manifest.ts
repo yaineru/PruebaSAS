@@ -5,7 +5,10 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "EmpresaOS",
     short_name: "EmpresaOS",
     description: "Gestión multiempresa de activos, mantenimiento y operaciones.",
-    start_url: "/",
+    // La app instalada como PWA (uso real en campo) debe abrir directo al
+    // panel, no a la landing pública nueva - si no hay sesión, el middleware
+    // igual rebota a /login como siempre.
+    start_url: "/dashboard",
     display: "standalone",
     background_color: "#f8fafc",
     theme_color: "#0f766e",

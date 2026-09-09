@@ -12,7 +12,7 @@ export default async function TechnicalReportsPage() {
   const tenant = await getTenantContext();
 
   if (!['ADMIN', 'SUPERVISOR', 'OPERARIO'].includes(tenant.role)) {
-    redirect('/');
+    redirect('/dashboard');
   }
 
   // Módulo oculto del sidebar para el nicho no debe seguir accesible por URL
@@ -20,7 +20,7 @@ export default async function TechnicalReportsPage() {
   // módulos genéricos).
   const settings = await getCompanySettings(tenant.companyId, tenant.companyName);
   if (!isModuleVisible(settings.businessType, "technical_reports")) {
-    redirect("/");
+    redirect("/dashboard");
   }
 
   return (

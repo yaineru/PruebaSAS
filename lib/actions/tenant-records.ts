@@ -70,7 +70,7 @@ async function resolveTenantContextForAction(): Promise<TenantContext> {
 
   const { data: membership, error: membershipError } = await supabase
     .from("memberships")
-    .select("user_id, company_id, role, companies!company_id(name)")
+    .select("user_id, company_id, role, companies!company_id(name, status)")
     .eq("auth_user_id", user.id)
     .eq("is_active", true)
     .limit(1)
@@ -79,11 +79,16 @@ async function resolveTenantContextForAction(): Promise<TenantContext> {
   if (!membershipError && membership) {
     const company = Array.isArray(membership.companies) ? membership.companies[0] : membership.companies;
 
+    if (company && company.status !== "ACTIVE") {
+      throw new Error("Tu empresa tiene el acceso suspendido temporalmente.");
+    }
+
     return {
       userId: membership.user_id,
       authUserId: user.id,
       companyId: membership.company_id,
       companyName: company?.name ?? "Empresa",
+      companyStatus: company?.status ?? "ACTIVE",
       role: membership.role
     };
   }
@@ -96,7 +101,7 @@ async function resolveTenantContextForAction(): Promise<TenantContext> {
 
   const { data: profile, error: profileError } = await supabase
     .from("users")
-    .select("id, company_id, role, companies!company_id(name)")
+    .select("id, company_id, role, companies!company_id(name, status)")
     .eq("auth_user_id", user.id)
     .eq("is_active", true)
     .limit(1)
@@ -113,11 +118,16 @@ async function resolveTenantContextForAction(): Promise<TenantContext> {
 
   const company = Array.isArray(profile.companies) ? profile.companies[0] : profile.companies;
 
+  if (company && company.status !== "ACTIVE") {
+    throw new Error("Tu empresa tiene el acceso suspendido temporalmente.");
+  }
+
   return {
     userId: profile.id,
     authUserId: user.id,
     companyId: profile.company_id,
     companyName: company?.name ?? "Empresa",
+    companyStatus: company?.status ?? "ACTIVE",
     role: profile.role
   };
 }

@@ -10,6 +10,7 @@ export type TenantContext = {
   authUserId: string;
   companyId: string;
   companyName: string;
+  companyStatus: string;
   role: string;
 };
 
@@ -19,7 +20,7 @@ async function resolveTenantContext(
 ): Promise<TenantContext | null> {
   const { data: membership, error: membershipError } = await supabase
     .from("memberships")
-    .select("user_id, company_id, role, companies!company_id(name)")
+    .select("user_id, company_id, role, companies!company_id(name, status)")
     .eq("auth_user_id", authUserId)
     .eq("is_active", true)
     .limit(1)
@@ -33,6 +34,7 @@ async function resolveTenantContext(
       authUserId,
       companyId: membership.company_id,
       companyName: company?.name ?? "Empresa",
+      companyStatus: company?.status ?? "ACTIVE",
       role: membership.role
     };
   }
@@ -45,7 +47,7 @@ async function resolveTenantContext(
 
   const { data: profile, error: profileError } = await supabase
     .from("users")
-    .select("id, company_id, role, companies!company_id(name)")
+    .select("id, company_id, role, companies!company_id(name, status)")
     .eq("auth_user_id", authUserId)
     .eq("is_active", true)
     .limit(1)
@@ -67,6 +69,7 @@ async function resolveTenantContext(
     authUserId,
     companyId: profile.company_id,
     companyName: company?.name ?? "Empresa",
+    companyStatus: company?.status ?? "ACTIVE",
     role: profile.role
   };
 }
@@ -87,7 +90,15 @@ export const getTenantContextOrNull = cache(async (): Promise<TenantContext | nu
 
   if (!user) return null;
 
-  return resolveTenantContext(supabase, user.id);
+  const tenantContext = await resolveTenantContext(supabase, user.id);
+  // `companies.status` (ACTIVE/SUSPENDED/ARCHIVED) existía en el esquema
+  // desde el día uno pero ningún RLS ni código de aplicación lo consultaba -
+  // suspender una empresa no tenía ningún efecto real. Los llamadores de
+  // esta variante ("¿hay un tenant válido?") deben tratar una empresa
+  // suspendida como si no hubiera tenant, sin redirigir.
+  if (tenantContext && tenantContext.companyStatus !== "ACTIVE") return null;
+
+  return tenantContext;
 });
 
 export const getTenantContext = cache(async (): Promise<TenantContext> => {
@@ -102,6 +113,10 @@ export const getTenantContext = cache(async (): Promise<TenantContext> => {
 
   if (!tenantContext) {
     redirect("/onboarding");
+  }
+
+  if (tenantContext.companyStatus !== "ACTIVE") {
+    redirect("/suspendida");
   }
 
   return tenantContext;

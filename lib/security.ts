@@ -2,8 +2,30 @@ import "server-only";
 import { headers } from "next/headers";
 import { z } from "zod";
 import type { TenantContext } from "@/lib/tenant";
+import { createClient } from "@/lib/supabase/server";
 
-const attempts = new Map<string, { count: number; resetAt: number }>();
+// Fallback en memoria SOLO para cuando la función de base de datos todavía no
+// existe (migración 042 sin aplicar) o la llamada falla por un problema de
+// red puntual - nunca es la defensa principal. Un Map de proceso no sobrevive
+// el modelo serverless de Vercel: cada invocación puede caer en una instancia
+// distinta con su propio Map vacío, así que el límite casi nunca se acumula
+// entre intentos reales. Por eso el conteo real ahora vive en Postgres
+// (public.rate_limits / check_rate_limit(), ver 042_persistent_rate_limiting.sql),
+// compartido entre todas las instancias.
+const memoryFallback = new Map<string, { count: number; resetAt: number }>();
+
+function checkMemoryFallback(key: string, limit: number, windowMs: number): boolean {
+  const now = Date.now();
+  const entry = memoryFallback.get(key);
+
+  if (!entry || entry.resetAt < now) {
+    memoryFallback.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  if (entry.count >= limit) return false;
+  entry.count += 1;
+  return true;
+}
 
 export function sanitizeText(value: unknown, max = 500) {
   const text = String(value ?? "")
@@ -19,19 +41,36 @@ export async function assertRateLimit(scope: string, limit = 20, windowMs = 60_0
   const forwardedFor = headersList.get("x-forwarded-for")?.split(",")[0]?.trim();
   const ip = forwardedFor || headersList.get("x-real-ip") || "local";
   const key = `${scope}:${ip}`;
-  const now = Date.now();
-  const entry = attempts.get(key);
 
-  if (!entry || entry.resetAt < now) {
-    attempts.set(key, { count: 1, resetAt: now + windowMs });
+  try {
+    const supabase = await createClient();
+    const { data: allowed, error } = await supabase.rpc("check_rate_limit", {
+      p_key: key,
+      p_limit: limit,
+      p_window_seconds: Math.ceil(windowMs / 1000)
+    });
+
+    if (error) throw error;
+
+    if (allowed === false) {
+      throw new Error("Demasiadas solicitudes. Intenta de nuevo en un momento.");
+    }
     return;
-  }
+  } catch (error) {
+    // Un límite real ya se lanzó arriba y termina aquí - repropágalo en vez
+    // de tratarlo como "la función RPC no está disponible".
+    if (error instanceof Error && error.message.startsWith("Demasiadas solicitudes")) {
+      throw error;
+    }
 
-  if (entry.count >= limit) {
-    throw new Error("Demasiadas solicitudes. Intenta de nuevo en un momento.");
-  }
+    console.warn("check_rate_limit RPC failed, using in-memory fallback (¿falta aplicar la migración 042?)", {
+      message: error instanceof Error ? error.message : String(error)
+    });
 
-  entry.count += 1;
+    if (!checkMemoryFallback(key, limit, windowMs)) {
+      throw new Error("Demasiadas solicitudes. Intenta de nuevo en un momento.");
+    }
+  }
 }
 
 export async function assertSameOrigin() {

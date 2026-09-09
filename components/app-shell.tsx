@@ -138,13 +138,22 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
               Integraciones
             </Link>
             {tenant.role === "SUPER_ADMIN" ? (
-              <Link
-                className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium hover:bg-muted"
-                href="/super-admin/auditoria"
-              >
-                <ShieldCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
-                Auditoria
-              </Link>
+              <>
+                <Link
+                  className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium hover:bg-muted"
+                  href="/super-admin/empresas"
+                >
+                  <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  Empresas
+                </Link>
+                <Link
+                  className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium hover:bg-muted"
+                  href="/super-admin/auditoria"
+                >
+                  <ShieldCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  Auditoria
+                </Link>
+              </>
             ) : null}
           </nav>
           <div className="border-t p-3">

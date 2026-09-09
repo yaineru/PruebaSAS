@@ -15,10 +15,21 @@ export type IndustryTemplate = {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  // No confundir con `isActive` (estado del template en BD, siempre true
+  // aquí). Esto marca si el nicho ya tiene una experiencia terminada y
+  // verificada hoy - hoy solo "machinery" (el único cliente real, Progrúas)
+  // y "general" (fallback genérico, todos los módulos con etiquetas
+  // neutrales) lo son. Los demás quedan visibles como "Próximamente" en el
+  // selector de registro: la auditoría de nichos encontró que, por ejemplo,
+  // "veterinary" todavía muestra etiquetas de maquinaria ("Horómetro",
+  // "Placa") en el formulario de Equipos - vender eso hoy como terminado
+  // sería prometer algo que no funciona bien todavía.
+  isAvailable: boolean;
 };
 
 export type IndustrySlug =
   | "machinery"
+  | "general"
   | "construction"
   | "veterinary"
   | "healthcare"
@@ -43,6 +54,24 @@ export const INDUSTRY_SLUGS: Record<IndustrySlug, IndustryTemplate> = {
     suggestedColorPrimary: "#1e40af",
     suggestedColorSecondary: "#f59e0b",
     isActive: true,
+    isAvailable: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  general: {
+    id: "",
+    name: "Otro tipo de negocio",
+    slug: "general",
+    description: "Gestión general de activos, mantenimientos, proyectos y novedades para cualquier operación",
+    icon: "🏢",
+    assetLabel: "Activos",
+    maintenanceLabel: "Mantenimientos",
+    projectLabel: "Proyectos",
+    incidentLabel: "Novedades",
+    suggestedColorPrimary: "#0f766e",
+    suggestedColorSecondary: "#f59e0b",
+    isActive: true,
+    isAvailable: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   },
@@ -59,6 +88,7 @@ export const INDUSTRY_SLUGS: Record<IndustrySlug, IndustryTemplate> = {
     suggestedColorPrimary: "#b91c1c",
     suggestedColorSecondary: "#fbbf24",
     isActive: true,
+    isAvailable: false,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   },
@@ -78,6 +108,7 @@ export const INDUSTRY_SLUGS: Record<IndustrySlug, IndustryTemplate> = {
     suggestedColorPrimary: "#7c2d12",
     suggestedColorSecondary: "#f59e0b",
     isActive: true,
+    isAvailable: false,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   },
@@ -94,6 +125,7 @@ export const INDUSTRY_SLUGS: Record<IndustrySlug, IndustryTemplate> = {
     suggestedColorPrimary: "#1e3a8a",
     suggestedColorSecondary: "#06b6d4",
     isActive: true,
+    isAvailable: false,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   },
@@ -110,6 +142,7 @@ export const INDUSTRY_SLUGS: Record<IndustrySlug, IndustryTemplate> = {
     suggestedColorPrimary: "#4f46e5",
     suggestedColorSecondary: "#60a5fa",
     isActive: true,
+    isAvailable: false,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   },
@@ -126,6 +159,7 @@ export const INDUSTRY_SLUGS: Record<IndustrySlug, IndustryTemplate> = {
     suggestedColorPrimary: "#7c2d12",
     suggestedColorSecondary: "#ea580c",
     isActive: true,
+    isAvailable: false,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   },
@@ -142,6 +176,7 @@ export const INDUSTRY_SLUGS: Record<IndustrySlug, IndustryTemplate> = {
     suggestedColorPrimary: "#0f766e",
     suggestedColorSecondary: "#f59e0b",
     isActive: true,
+    isAvailable: false,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   }
@@ -152,6 +187,7 @@ export const industryTemplateSchema = z.object({
   name: z.string().min(3).max(100),
   slug: z.enum([
     "machinery",
+    "general",
     "construction",
     "veterinary",
     "healthcare",
@@ -168,6 +204,7 @@ export const industryTemplateSchema = z.object({
   suggestedColorPrimary: z.string().regex(/^#[0-9a-f]{6}$/i),
   suggestedColorSecondary: z.string().regex(/^#[0-9a-f]{6}$/i),
   isActive: z.boolean(),
+  isAvailable: z.boolean(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime()
 });
@@ -196,4 +233,13 @@ export function getAllIndustries(): IndustryTemplate[] {
 // defensa en profundidad en la capa de aplicación, no la fuente de verdad.
 export function isValidIndustrySlug(value: string): value is IndustrySlug {
   return Object.prototype.hasOwnProperty.call(INDUSTRY_SLUGS, value);
+}
+
+// Un slug puede ser válido (existe en INDUSTRY_SLUGS) pero todavía no estar
+// listo para venderse (isAvailable: false, ver el comentario en
+// IndustryTemplate). registerAccount usa esto, no solo isValidIndustrySlug,
+// para que alguien no pueda saltarse la tarjeta deshabilitada del selector
+// enviando el valor a mano y terminar con un nicho a medio terminar.
+export function isAvailableIndustrySlug(value: string): value is IndustrySlug {
+  return isValidIndustrySlug(value) && INDUSTRY_SLUGS[value].isAvailable;
 }

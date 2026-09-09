@@ -5,7 +5,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { assertRateLimit, assertSameOrigin, sanitizeText } from "@/lib/security";
 import { trackAnalyticsEvent } from "@/lib/actions/notifications";
-import { isValidIndustrySlug } from "@/lib/industries";
+import { isAvailableIndustrySlug } from "@/lib/industries";
 
 const emailSchema = z.string().email();
 
@@ -66,11 +66,14 @@ export async function registerAccount(
     const companyName = sanitizeText(formData.get("company_name"), 160);
     const rawIndustryTemplateId = sanitizeText(formData.get("industry_template_id"), 254);
     // No dejar pasar valores arbitrarios a metadata de Supabase Auth: si no es
-    // uno de los slugs soportados (vacío, manipulado, o un valor viejo/futuro
-    // que ya no existe), cae al comportamiento seguro "general" en vez de
-    // bloquear el registro - el trigger de BD hace la misma validación de
-    // nuevo contra industry_templates, esto es solo defensa en profundidad.
-    const industryTemplateId = isValidIndustrySlug(rawIndustryTemplateId) ? rawIndustryTemplateId : "general";
+    // uno de los slugs soportados y disponibles hoy (vacío, manipulado, un
+    // valor viejo/futuro que ya no existe, o un nicho marcado "Próximamente"
+    // en el selector - ver isAvailable en lib/industries.ts), cae al
+    // comportamiento seguro "general" en vez de bloquear el registro o dejar
+    // pasar un nicho que todavía no está terminado. El trigger de BD hace la
+    // misma validación de nuevo contra industry_templates; esto es defensa en
+    // profundidad, no la única barrera.
+    const industryTemplateId = isAvailableIndustrySlug(rawIndustryTemplateId) ? rawIndustryTemplateId : "general";
 
     if (!emailSchema.safeParse(email).success) {
       return { success: false, error: "Ingresa un correo valido." };

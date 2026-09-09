@@ -26,11 +26,21 @@ export function IndustrySelector({ onSelect }: Props) {
         {industries.map((industry) => (
           <Card
             key={industry.slug}
-            className={`cursor-pointer transition-all ${
-              selected === industry.slug ? "border-primary ring-2 ring-primary" : "border-input hover:border-primary"
+            aria-disabled={!industry.isAvailable}
+            className={`relative transition-all ${
+              !industry.isAvailable
+                ? "cursor-not-allowed opacity-60"
+                : selected === industry.slug
+                  ? "cursor-pointer border-primary ring-2 ring-primary"
+                  : "cursor-pointer border-input hover:border-primary"
             }`}
-            onClick={() => setSelected(industry.slug)}
+            onClick={() => industry.isAvailable && setSelected(industry.slug)}
           >
+            {!industry.isAvailable ? (
+              <span className="absolute right-3 top-3 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Próximamente
+              </span>
+            ) : null}
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1">
@@ -40,15 +50,17 @@ export function IndustrySelector({ onSelect }: Props) {
                   </div>
                   <CardDescription className="mt-2 line-clamp-2">{industry.description}</CardDescription>
                 </div>
-                <div
-                  className="h-5 w-5 rounded-full border-2 flex items-center justify-center"
-                  style={{
-                    borderColor: industry.suggestedColorPrimary,
-                    backgroundColor: selected === industry.slug ? industry.suggestedColorPrimary : "transparent"
-                  }}
-                >
-                  {selected === industry.slug && <div className="h-2 w-2 rounded-full bg-white" />}
-                </div>
+                {industry.isAvailable ? (
+                  <div
+                    className="h-5 w-5 shrink-0 rounded-full border-2 flex items-center justify-center"
+                    style={{
+                      borderColor: industry.suggestedColorPrimary,
+                      backgroundColor: selected === industry.slug ? industry.suggestedColorPrimary : "transparent"
+                    }}
+                  >
+                    {selected === industry.slug && <div className="h-2 w-2 rounded-full bg-white" />}
+                  </div>
+                ) : null}
               </div>
             </CardHeader>
             <CardContent className="pt-0">
@@ -66,6 +78,10 @@ export function IndustrySelector({ onSelect }: Props) {
           </Card>
         ))}
       </div>
+      <p className="text-xs text-muted-foreground">
+        Los rubros marcados &ldquo;Próximamente&rdquo; todavía están en ajuste y no están disponibles para registrarse.
+        Si tu negocio no encaja en ninguno, elige &ldquo;Otro tipo de negocio&rdquo;.
+      </p>
 
       <Button
         className="w-full"

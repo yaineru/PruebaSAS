@@ -37,7 +37,11 @@ export async function generateReport(formData: FormData) {
     await assertSameOrigin();
     await assertRateLimit('generateReport', 10);
 
-    const { companyId, userId } = await getTenantContext();
+    const { companyId, userId, role } = await getTenantContext();
+
+    if (role !== 'ADMIN' && role !== 'SUPERVISOR' && role !== 'SUPER_ADMIN') {
+      return { success: false, error: 'Se requiere rol de administrador o supervisor para generar informes.' };
+    }
 
     // Extract form data
     const reportEntity = sanitizeText(formData.get('reportEntity') as string);
@@ -849,7 +853,11 @@ export async function sendReportByEmail(reportId: string, formData: FormData): P
     await assertSameOrigin();
     await assertRateLimit('sendReportByEmail', 10);
 
-    const { companyId, userId } = await getTenantContext();
+    const { companyId, userId, role } = await getTenantContext();
+
+    if (role !== 'ADMIN' && role !== 'SUPERVISOR' && role !== 'SUPER_ADMIN') {
+      return { success: false, error: 'Se requiere rol de administrador o supervisor para enviar informes por correo.' };
+    }
 
     const to = sanitizeText(formData.get('to'), 255);
     const cc = sanitizeText(formData.get('cc') || '', 255);

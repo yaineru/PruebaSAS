@@ -86,7 +86,7 @@ Debajo, tres gráficos (estado de equipos, mantenimientos por mes, novedades por
 
 **Editar**: botón "Editar" sobre el registro, mismo formulario precargado. Disponible para ADMIN y SUPERVISOR.
 
-**Eliminar**: sí es posible, con confirmación ("Esta acción no se puede deshacer"). Disponible para ADMIN y SUPERVISOR — OPERARIO no puede eliminar equipos.
+**Eliminar**: sí es posible, con confirmación ("Esta acción no se puede deshacer"). Disponible solo para ADMIN — SUPERVISOR puede editar equipos (ver arriba) pero no eliminarlos; OPERARIO no puede ni editar ni eliminar equipos.
 
 **Ficha detallada de un equipo** (clic sobre el nombre del equipo):
 - Ficha técnica completa.
@@ -127,7 +127,7 @@ Debajo, tres gráficos (estado de equipos, mantenimientos por mes, novedades por
 
 **Actualizar**: puede editar título, relaciones, tipo, fecha de vencimiento y estado. **Limitación actual de la plataforma**: no existe una opción para reemplazar el archivo de un documento ya cargado — para cambiarlo hay que eliminarlo y volver a cargarlo.
 
-**Eliminar**: disponible desde el botón propio de cada documento, con confirmación.
+**Eliminar**: disponible desde el botón propio de cada documento, con confirmación. Solo ADMIN ve este botón — SUPERVISOR y OPERARIO pueden consultar y descargar, pero no eliminar. Cargar un documento nuevo requiere ADMIN o SUPERVISOR; OPERARIO no ve el formulario de carga.
 
 **Recomendaciones**: nombres claros y consistentes (ej. "Póliza 2026 — Excavadora EQ-001"), relación siempre con el equipo correspondiente, y revisión periódica del indicador "Documentos por vencer".
 
@@ -139,7 +139,7 @@ Debajo, tres gráficos (estado de equipos, mantenimientos por mes, novedades por
 
 **Relacionar información**: mantenimientos, documentos y novedades pueden vincularse opcionalmente a una obra específica.
 
-**Eliminar**: disponible para ADMIN y SUPERVISOR.
+**Eliminar**: disponible solo para ADMIN.
 
 **Uso recomendado**: cree la obra antes de registrar mantenimientos o novedades relacionados, para poder filtrar la información por obra en los informes.
 
@@ -168,12 +168,13 @@ Debajo, tres gráficos (estado de equipos, mantenimientos por mes, novedades por
 
 | Puede hacer | Administrador | Supervisor | Operario |
 |---|---|---|---|
-| Crear/editar/eliminar equipos y obras | Sí | Sí | No |
+| Crear/editar equipos y obras | Sí | Sí | No |
+| Eliminar equipos, obras, mantenimientos o novedades | Sí | No | No |
 | Crear/editar mantenimientos y novedades | Sí | Sí | Sí |
-| Eliminar mantenimientos/novedades | Sí | Sí | No |
-| Cargar y eliminar documentos | Sí | Sí | Sí |
+| Cargar documentos | Sí | Sí | No |
+| Eliminar documentos | Sí | No | No |
 | Crear/editar usuarios | Sí | No | No |
-| Generar informes (Informes → Generar) | Sí | Sí | No (solo puede ver el historial) |
+| Generar informes y enviarlos por correo (Informes → Generar) | Sí | Sí | No (solo puede ver el historial) |
 | Crear informes técnicos | Sí | Sí | Sí |
 | Configurar correo SMTP / Webhooks / Plantillas de informes / Programación de informes | Sí | No | No |
 | Agenda, Notificaciones, Analytics, Integraciones | Sí | Sí | Sí |

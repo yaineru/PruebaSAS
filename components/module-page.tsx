@@ -76,10 +76,18 @@ export async function ModulePage({
       ? [...baseColumns, filterField]
       : baseColumns;
 
+  // La policy RLS real (can_manage_company, ver 001_initial_multitenant_schema.sql
+  // y su reafirmación en 027_resweep_stray_owner_role_policies.sql) sólo
+  // permite DELETE a ADMIN/SUPER_ADMIN - nunca incluyó a SUPERVISOR, a
+  // diferencia de insert/update que sí usan can_manage_operations (ADMIN+
+  // SUPERVISOR). Este flag antes permitía SUPERVISOR, así que el botón se
+  // mostraba pero la base de datos rechazaba el borrado en silencio: el
+  // usuario veía "eliminado" y el registro seguía intacto. Alineado a la
+  // policy real en vez de relajar RLS para que coincida con la UI.
   const deletableTables = new Set(["assets", "maintenance_records", "incidents", "projects"]);
   const canDelete =
     deletableTables.has(visibleModule.table) &&
-    (tenant.role === "SUPER_ADMIN" || tenant.role === "ADMIN" || tenant.role === "SUPERVISOR");
+    (tenant.role === "SUPER_ADMIN" || tenant.role === "ADMIN");
 
   // Mirrors lib/security.ts assertCanCreate() - editing a record requires the
   // same permission tier as creating one ("users" is ADMIN/SUPER_ADMIN-only,
@@ -260,6 +268,7 @@ export async function ModulePage({
                                 id={String(row.id)}
                                 filePath={row.file_path ? String(row.file_path) : null}
                                 fileName={row.file_name ? String(row.file_name) : null}
+                                canDelete={tenant.role === "SUPER_ADMIN" || tenant.role === "ADMIN"}
                               />
                             ) : canDelete ? (
                               <TenantRecordDeleteButton

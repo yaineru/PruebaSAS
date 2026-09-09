@@ -68,7 +68,11 @@ export function assertCanDelete(table: string, tenant: TenantContext) {
   if (!deletableTables.has(table)) {
     throw new Error("Este tipo de registro no se puede eliminar desde aquí.");
   }
-  if (role === "SUPER_ADMIN" || role === "ADMIN" || role === "SUPERVISOR") return;
+  // Debe coincidir exactamente con la policy RLS can_manage_company (DELETE
+  // en assets/maintenance_records/incidents/projects es ADMIN/SUPER_ADMIN
+  // desde 001_initial_multitenant_schema.sql) - SUPERVISOR nunca tuvo este
+  // permiso ahí, a diferencia de crear/editar (can_manage_operations).
+  if (role === "SUPER_ADMIN" || role === "ADMIN") return;
 
   throw new Error("No tienes permisos para eliminar este registro.");
 }

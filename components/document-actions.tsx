@@ -11,9 +11,15 @@ type DocumentActionsProps = {
   id: string;
   filePath: string | null;
   fileName: string | null;
+  // La policy RLS de storage/BD para eliminar documentos es ADMIN-only
+  // (company_files_delete / documents_delete, can_manage_company). El botón
+  // antes se mostraba a todos los roles y fallaba en silencio con un mensaje
+  // genérico para SUPERVISOR/OPERARIO - ahora se oculta directamente para
+  // quien nunca podría completar la acción.
+  canDelete: boolean;
 };
 
-export function DocumentActions({ id, filePath, fileName }: DocumentActionsProps) {
+export function DocumentActions({ id, filePath, fileName, canDelete }: DocumentActionsProps) {
   const router = useRouter();
   const supabase = createClient();
   const [busy, setBusy] = useState(false);
@@ -78,10 +84,12 @@ export function DocumentActions({ id, filePath, fileName }: DocumentActionsProps
         <Download className="h-4 w-4" />
         Descargar
       </Button>
-      <Button type="button" size="sm" variant="destructive" disabled={disabled} onClick={() => setConfirmOpen(true)}>
-        <Trash2 className="h-4 w-4" />
-        Eliminar
-      </Button>
+      {canDelete ? (
+        <Button type="button" size="sm" variant="destructive" disabled={disabled} onClick={() => setConfirmOpen(true)}>
+          <Trash2 className="h-4 w-4" />
+          Eliminar
+        </Button>
+      ) : null}
 
       <ConfirmDialog
         open={confirmOpen}

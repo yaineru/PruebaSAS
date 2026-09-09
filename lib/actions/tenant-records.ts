@@ -410,11 +410,12 @@ export async function deleteTenantRecord(table: ModuleKey, recordId: string) {
     assertCanDelete(table, tenant);
 
     const supabase = await createClient();
-    const { error } = await supabase
+    const { data: deletedRows, error } = await supabase
       .from(table)
       .delete()
       .eq("id", recordId)
-      .eq("company_id", tenant.companyId);
+      .eq("company_id", tenant.companyId)
+      .select("id");
 
     if (error) {
       console.error("Tenant record delete failed", {
@@ -423,6 +424,13 @@ export async function deleteTenantRecord(table: ModuleKey, recordId: string) {
         message: error.message
       });
       return failure("No se pudo eliminar el registro.");
+    }
+
+    // assertCanDelete ya debería impedir llegar aquí sin permiso, pero si RLS
+    // igual rechaza la fila (0 filas devueltas) no reportamos éxito: evita
+    // repetir el bug de "dice eliminado pero el registro sigue intacto".
+    if (!deletedRows || deletedRows.length === 0) {
+      return failure("No se pudo eliminar el registro: no tienes permisos suficientes sobre él.");
     }
 
     const moduleDef = getModuleByKey(table);

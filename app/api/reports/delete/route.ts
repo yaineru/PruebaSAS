@@ -39,6 +39,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No se encontró el informe.' }, { status: 404 });
     }
 
+    // Eliminar informes generados es una operación de administrador (ver
+    // policy generated_reports_delete, can_manage_company => solo
+    // ADMIN/SUPER_ADMIN). Antes esta ruta no lo verificaba: cualquier rol
+    // veía el botón, la llamada "tenía éxito", y RLS bloqueaba el borrado
+    // en silencio - el usuario creía haber eliminado algo que seguía intacto.
+    if (tenant.role !== 'ADMIN' && tenant.role !== 'SUPER_ADMIN') {
+      return NextResponse.json(
+        { error: 'Se requiere rol de administrador para eliminar informes.' },
+        { status: 403 }
+      );
+    }
+
     if (report.file_path) {
       const { error: storageError } = await supabase.storage.from('reports').remove([report.file_path]);
       if (storageError) {
@@ -58,15 +70,27 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const { error: deleteError } = await supabase
+    const { data: deletedRows, error: deleteError } = await supabase
       .from('generated_reports')
       .delete()
       .eq('id', reportId)
-      .eq('company_id', companyId);
+      .eq('company_id', companyId)
+      .select('id');
 
     if (deleteError) {
       console.error('REPORT_DELETE_ERROR', { reportId, message: deleteError.message });
       return NextResponse.json({ error: 'No se pudo eliminar el informe.' }, { status: 500 });
+    }
+
+    // El chequeo de rol arriba ya debería impedir llegar aquí sin permiso,
+    // pero si RLS igual rechaza la fila (0 filas devueltas) no reportamos
+    // éxito: el mensaje debe reflejar lo que realmente pasó en la base de
+    // datos, no lo que la ruta esperaba que pasara.
+    if (!deletedRows || deletedRows.length === 0) {
+      return NextResponse.json(
+        { error: 'No se pudo eliminar el informe: no tienes permisos suficientes sobre este registro.' },
+        { status: 403 }
+      );
     }
 
     // The DELETE above is already captured by the audit_generated_reports

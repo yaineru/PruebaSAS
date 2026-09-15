@@ -8,6 +8,7 @@ import type { TenantContext } from "@/lib/tenant";
 import { assertCanCreate, assertCanDelete, assertRateLimit, assertSameOrigin, primitiveFieldSchema, sanitizeText } from "@/lib/security";
 import { coerceEnumValue, enumSchemas } from "@/lib/enums";
 import { trackAnalyticsEvent } from "@/lib/actions/notifications";
+import { getMissingAssetFields } from "@/lib/asset-completeness";
 
 const allowedTables = modules.map((moduleDef) => moduleDef.table);
 const createRecordSchema = z.object({
@@ -52,6 +53,18 @@ const uniqueConstraintMessages: Record<string, string> = {
 
 function failure(error: string): TenantRecordActionState {
   return { success: false, error };
+}
+
+// Guardar un equipo incompleto es una acción válida e intencional (ver
+// lib/asset-completeness.ts), no un error - el mensaje debe dejarlo claro en
+// vez de sonar a que algo salió mal.
+function buildCreateSuccessMessage(table: ModuleKey, payload: Record<string, string | number>): string {
+  if (table !== "assets") return "Registro creado correctamente.";
+
+  const missing = getMissingAssetFields(payload);
+  if (missing.length === 0) return "Equipo creado correctamente.";
+
+  return `Equipo creado correctamente. Puedes completar más adelante: ${missing.join(", ")}.`;
 }
 
 async function resolveTenantContextForAction(): Promise<TenantContext> {
@@ -311,7 +324,7 @@ export async function createTenantRecord(
 
     await trackAnalyticsEvent(`CREATE_${parsed.table.toUpperCase()}`);
     revalidatePath(parsed.redirectTo);
-    return { success: true, message: "Registro creado correctamente." };
+    return { success: true, message: buildCreateSuccessMessage(parsed.table, payload) };
   } catch (error) {
     console.error("Tenant record action failed", {
       table: parsed?.table,

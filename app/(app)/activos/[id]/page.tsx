@@ -7,6 +7,7 @@ import { formatDate } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AssetImageGallery, type GalleryComparison, type GalleryImage } from "@/components/asset-image-gallery";
+import { getMissingAssetFields } from "@/lib/asset-completeness";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -104,6 +105,8 @@ export default async function AssetDetailPage({ params }: PageProps) {
     notes: comparison.notes
   }));
 
+  const missingFields = getMissingAssetFields(asset);
+
   const details = [
     ["Código interno", asset.code],
     ["Placa", asset.plate],
@@ -135,6 +138,14 @@ export default async function AssetDetailPage({ params }: PageProps) {
           </div>
           <Badge variant="secondary">{getEnumLabel("assetStatus", asset.status)}</Badge>
         </div>
+        {missingFields.length > 0 ? (
+          <div className="mt-4 rounded-md border border-accent/40 bg-accent/10 p-3 text-sm text-accent-foreground">
+            <p className="font-medium">⚠ Información pendiente</p>
+            <p className="mt-1 text-muted-foreground">
+              Faltan: {missingFields.join(", ")}. Puedes completarlos desde Equipos → Editar cuando tengas esos datos.
+            </p>
+          </div>
+        ) : null}
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">

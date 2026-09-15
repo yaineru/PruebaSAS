@@ -158,7 +158,10 @@ export function TenantRecordForm({
         ) : null}
         {fields.map((field) => (
           <div className="space-y-2" key={field.name}>
-            <Label htmlFor={field.name}>{field.label}</Label>
+            <Label htmlFor={field.name}>
+              {field.label}
+              {!field.required ? <span className="ml-1 font-normal text-muted-foreground">(opcional)</span> : null}
+            </Label>
             {field.options ? (
               <select
                 id={field.name}

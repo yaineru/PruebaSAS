@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import type { ModuleConfig, ModuleField } from "@/lib/modules";
 import { applyCompanySettings, getCompanySettings } from "@/lib/company-settings";
 import { isModuleVisible } from "@/lib/niches";
+import { getMissingAssetFields } from "@/lib/asset-completeness";
 import { getEnumLabel } from "@/lib/enums";
 import { createClient } from "@/lib/supabase/server";
 import { formatDate } from "@/lib/utils";
@@ -225,6 +226,7 @@ export async function ModulePage({
                     {visibleColumns.map((field) => (
                       <TableHead key={field.name}>{field.label}</TableHead>
                     ))}
+                    {visibleModule.table === "assets" ? <TableHead>Información</TableHead> : null}
                     <TableHead>Creado</TableHead>
                     {visibleModule.table === "asset_documents" || canDelete || canEdit ? (
                       <TableHead>Acciones</TableHead>
@@ -245,6 +247,11 @@ export async function ModulePage({
                           )}
                         </TableCell>
                       ))}
+                      {visibleModule.table === "assets" ? (
+                        <TableCell>
+                          <AssetCompletenessBadge row={row} />
+                        </TableCell>
+                      ) : null}
                       <TableCell className="text-muted-foreground">
                         {formatDate(String(row.created_at ?? ""))}
                       </TableCell>
@@ -301,6 +308,23 @@ function statusBadgeVariant(rawValue: string): "default" | "warning" | "destruct
   if (/COMPLET|RESUELTO|CERRADO|AVAILABLE|DISPONIBLE|^ACTIVE$/.test(value)) return "default";
   if (/PENDING|SCHEDULED|PROGRESS|MAINTENANCE|PROCESO|ABIERTO|PROGRAMAD/.test(value)) return "warning";
   return "secondary";
+}
+
+// "Información" es un estado separado del `status` operativo del equipo
+// (Disponible/Mantenimiento/etc) - un equipo puede estar perfectamente
+// Disponible y, aparte, tener datos identificativos pendientes de completar
+// (ver lib/asset-completeness.ts). El título del badge lista qué falta sin
+// necesidad de un componente de detalle aparte.
+function AssetCompletenessBadge({ row }: { row: TenantRow }) {
+  const missing = getMissingAssetFields(row);
+  if (missing.length === 0) {
+    return <Badge variant="secondary">Completa</Badge>;
+  }
+  return (
+    <Badge variant="warning" title={`Falta: ${missing.join(", ")}`}>
+      Pendiente
+    </Badge>
+  );
 }
 
 function renderCell(value: TenantRow[string], field: ModuleField, isStatusLike = false) {

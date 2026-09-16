@@ -14,6 +14,15 @@
 // Mantenimiento/etc) - un equipo puede estar Disponible y, aparte, tener
 // información pendiente de completar.
 
+// hour_meter queda deliberadamente FUERA de esta lista. La columna es
+// `numeric not null default 0` (ver 001_initial_multitenant_schema.sql) - no
+// existe un estado NULL para representar "todavía no se sabe", y 0 es un
+// valor de negocio real y frecuente (un equipo recién adquirido, o con el
+// horómetro reiniciado, legítimamente tiene 0 horas). Marcarlo "pendiente"
+// cada vez que valga 0 produciría falsos positivos exactamente en el caso
+// más común de equipo nuevo, así que no se incluye en el cálculo de
+// información pendiente. Completarlo sigue siendo tan opcional como hoy en
+// el formulario; simplemente no se usa como señal de "falta información".
 export const ASSET_COMPLETABLE_FIELDS: ReadonlyArray<{ key: string; label: string }> = [
   { key: "location", label: "Ubicación" },
   { key: "plate", label: "Placa" },
@@ -21,22 +30,13 @@ export const ASSET_COMPLETABLE_FIELDS: ReadonlyArray<{ key: string; label: strin
   { key: "model", label: "Modelo" },
   { key: "year", label: "Año" },
   { key: "provider", label: "Proveedor" },
-  { key: "hour_meter", label: "Horómetro" },
   { key: "next_maintenance_date", label: "Próximo mantenimiento" },
   { key: "insurance_expiration", label: "Vence póliza" },
   { key: "technical_certificate_expiration", label: "Vence certificado" }
 ];
 
-function isFieldPending(key: string, value: unknown): boolean {
-  if (value === null || value === undefined || value === "") return true;
-  // hour_meter es NOT NULL DEFAULT 0 en la base de datos - no se puede
-  // distinguir "nunca se diligenció" de "es cero" a nivel de columna, así
-  // que se trata 0 como pendiente. Costo de esto: un equipo genuinamente
-  // nuevo con 0 horas reales queda marcado "pendiente" hasta que alguien
-  // confirme el dato - aceptable, es solo un indicador informativo, nunca
-  // bloquea nada.
-  if (key === "hour_meter" && Number(value) === 0) return true;
-  return false;
+function isFieldPending(value: unknown): boolean {
+  return value === null || value === undefined || value === "";
 }
 
 // Acepta tanto una fila completa de `assets` como el payload parcial que
@@ -44,9 +44,7 @@ function isFieldPending(key: string, value: unknown): boolean {
 // ambos casos) - así el mismo cálculo sirve para el formulario recién
 // guardado y para la ficha ya persistida.
 export function getMissingAssetFields(fields: Record<string, unknown>): string[] {
-  return ASSET_COMPLETABLE_FIELDS.filter((field) => isFieldPending(field.key, fields[field.key])).map(
-    (field) => field.label
-  );
+  return ASSET_COMPLETABLE_FIELDS.filter((field) => isFieldPending(fields[field.key])).map((field) => field.label);
 }
 
 export function isAssetInfoComplete(fields: Record<string, unknown>): boolean {

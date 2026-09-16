@@ -14,7 +14,6 @@ describe("getMissingAssetFields", () => {
       "Modelo",
       "Año",
       "Proveedor",
-      "Horómetro",
       "Próximo mantenimiento",
       "Vence póliza",
       "Vence certificado"
@@ -49,12 +48,10 @@ describe("getMissingAssetFields", () => {
     expect(after.length).toBe(before.length - 1);
   });
 
-  it("hour_meter en 0 cuenta como pendiente (no se puede distinguir de 'nunca diligenciado')", () => {
-    expect(getMissingAssetFields({ name: "x", code: "y", hour_meter: 0 })).toContain("Horómetro");
-  });
-
-  it("hour_meter con un valor real no cuenta como pendiente", () => {
+  it("hour_meter nunca cuenta como pendiente: 0 es un valor de negocio real (equipo nuevo) y la columna no admite NULL", () => {
+    expect(getMissingAssetFields({ name: "x", code: "y", hour_meter: 0 })).not.toContain("Horómetro");
     expect(getMissingAssetFields({ name: "x", code: "y", hour_meter: 500 })).not.toContain("Horómetro");
+    expect(getMissingAssetFields({ name: "x", code: "y" })).not.toContain("Horómetro");
   });
 
   it("cadenas vacías cuentan como pendiente igual que null/undefined", () => {

@@ -88,7 +88,12 @@ export async function getMaintenanceTechnicalDetails(maintenanceId: string) {
   }
 }
 
-const MAX_EVIDENCE_PAIRS = 6;
+// Antes el tope se expresaba como "6 pares" (Antes+Después) = 12 fotos.
+// Ahora cada foto es independiente (ver components/technical-report-form.tsx
+// y lib/reports/generators.ts), así que el mismo tope real se expresa
+// directamente en fotos individuales.
+const MAX_EVIDENCE_ITEMS = 12;
+const EVIDENCE_TYPES = new Set(['BEFORE', 'AFTER', 'EVIDENCE']);
 
 export async function generateTechnicalReport(formData: FormData) {
   let reportId: string | null = null;
@@ -148,7 +153,7 @@ export async function generateTechnicalReport(formData: FormData) {
 
     const evidenceCount = Math.min(
       Math.max(parseInt((formData.get('evidenceCount') as string) || '0', 10) || 0, 0),
-      MAX_EVIDENCE_PAIRS
+      MAX_EVIDENCE_ITEMS
     );
 
     // Evidence photos are now uploaded straight from the browser to the
@@ -157,14 +162,22 @@ export async function generateTechnicalReport(formData: FormData) {
     // objects used to arrive here and get written to the local filesystem,
     // which is read-only on Vercel and also had no expiry/auth on the served
     // URL; that upload path was removed entirely.
-    let evidenceItems: Array<{ title?: string; beforeUrl?: string | null; afterUrl?: string | null }>;
+    //
+    // Each photo is independent (no more forced Antes/Después pairing) - a
+    // real case reported by a Progrúas user: many jobs don't have a
+    // before/after as such, just several evidence photos of the work, the
+    // part, the site, etc. `type` defaults to 'EVIDENCE' if missing/invalid
+    // rather than rejecting the report, since this is display metadata, not
+    // a security boundary.
+    let evidenceItems: Array<{ title?: string; url?: string | null; type: 'BEFORE' | 'AFTER' | 'EVIDENCE' }>;
     try {
       evidenceItems = Array.from({ length: evidenceCount }, (_, index) => {
-        const beforeUrl = (formData.get(`evidenceBeforeUrl_${index}`) as string) || null;
-        const afterUrl = (formData.get(`evidenceAfterUrl_${index}`) as string) || null;
+        const url = (formData.get(`evidenceUrl_${index}`) as string) || null;
         const title = sanitizeText(formData.get(`evidenceTitle_${index}`) as string, 150);
+        const rawType = (formData.get(`evidenceType_${index}`) as string) || '';
+        const type = (EVIDENCE_TYPES.has(rawType) ? rawType : 'EVIDENCE') as 'BEFORE' | 'AFTER' | 'EVIDENCE';
 
-        return { title: title || undefined, beforeUrl, afterUrl };
+        return { title: title || undefined, url, type };
       });
     } catch (fileError) {
       return { success: false, error: fileError instanceof Error ? fileError.message : 'No fue posible procesar las imágenes.' };

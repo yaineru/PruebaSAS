@@ -215,13 +215,13 @@ Debajo, tres gráficos (estado de equipos, mantenimientos por mes, novedades por
 
 ## 11. Informes técnicos
 
-**Para qué sirven**: generar un informe formal de una visita de mantenimiento a un cliente, con firma digital del técnico y del cliente, y evidencia fotográfica antes/después. Disponible para ADMIN, SUPERVISOR y OPERARIO.
+**Para qué sirven**: generar un informe formal de una visita de mantenimiento a un cliente, con firma digital del técnico y del cliente, y evidencia fotográfica. Disponible para ADMIN, SUPERVISOR y OPERARIO.
 
 **Cómo crear uno**:
 1. "Informes técnicos".
 2. Opcionalmente seleccione un **Mantenimiento asociado** ya registrado — autocompleta varios campos.
 3. Complete cliente (obligatorio), contacto, proyecto/equipo intervenido, responsable, técnico, tipo de mantenimiento, y describa el problema (obligatorio), diagnóstico, actividades realizadas, materiales/repuestos utilizados, observaciones y recomendaciones.
-4. Si aplica, agregue hasta 6 pares de fotos de evidencia (antes/después).
+4. Si aplica, agregue hasta 12 fotos de evidencia. Las fotografías de los informes técnicos pueden registrarse como **Antes**, **Después** o **Evidencia** — no es obligatorio usar pares Antes/Después: puede cargar solo fotos de Evidencia (del trabajo, de una pieza, del sitio), solo Antes, solo Después, o cualquier combinación. Cada foto trae "Evidencia" seleccionado por defecto y usted puede cambiarlo antes de generar el informe.
 5. Registre la firma del técnico y la firma del cliente (nombre, cargo, fecha y firma dibujada en pantalla).
 6. Presione **"Generar informe técnico"**.
 

@@ -5,6 +5,13 @@ import ExcelJS from 'exceljs';
 import sharp from 'sharp';
 import { darkenHex, hexToRgb, resolveTemplateColorHex } from '@/lib/reports/color-palette';
 import { formatDateTime } from '@/lib/utils';
+import { normalizeEvidenceItems, EVIDENCE_TYPE_LABELS } from '@/lib/reports/technical-evidence';
+import type { TechnicalReportEvidenceItem } from '@/lib/reports/technical-evidence';
+export type {
+  TechnicalReportEvidenceType,
+  TechnicalReportEvidenceItem,
+  NormalizedEvidencePhoto,
+} from '@/lib/reports/technical-evidence';
 
 // Neutral EmpresaOS mark (public/icon.svg rasterized) used as the fallback
 // logo/watermark for ANY company that hasn't configured its own
@@ -466,12 +473,6 @@ export async function generatePdf(
   }
 }
 
-export type TechnicalReportEvidenceItem = {
-  title?: string;
-  beforeUrl?: string | null;
-  afterUrl?: string | null;
-};
-
 export type TechnicalReportData = {
   reportDate?: string;
   clientName?: string;
@@ -531,17 +532,17 @@ export async function generateTechnicalPdf(
     const contentWidth = pageWidth - margin * 2;
     const footerReserve = 22;
 
-    const evidenceItems = (reportData.evidenceItems || []).filter((item) => item.beforeUrl || item.afterUrl);
+    const evidencePhotos = normalizeEvidenceItems(reportData.evidenceItems || []);
 
     const [logoImage, technicianSignatureImage, clientSignatureImage, resolvedEvidence] = await Promise.all([
       resolveImageAsBase64(options.companyLogoUrl || DEFAULT_LOGO_PATH),
       resolveImageAsBase64(reportData.technicalSignatureImage),
       resolveImageAsBase64(reportData.clientSignatureImage),
       Promise.all(
-        evidenceItems.map(async (item) => ({
-          title: item.title,
-          before: await resolveImageAsBase64(item.beforeUrl),
-          after: await resolveImageAsBase64(item.afterUrl),
+        evidencePhotos.map(async (photo) => ({
+          title: photo.title,
+          type: photo.type,
+          image: await resolveImageAsBase64(photo.url),
         }))
       ),
     ]);
@@ -709,48 +710,76 @@ export async function generateTechnicalPdf(
     addParagraphSection('Recomendaciones', reportData.recommendations || '');
 
     // ---- Evidencias fotográficas ----
+    // Antes esta sección siempre dibujaba dos cajas fijas "Antes"/"Después"
+    // por registro, con "Sin imagen registrada" cuando faltaba una de las
+    // dos - obligando visualmente a una pareja aunque la foto real fuera
+    // solo evidencia suelta. Ahora se agrupa por tipo y solo se dibuja un
+    // subtítulo para los tipos que realmente tienen fotos: nunca una caja
+    // vacía de "Antes" o "Después" cuando no hay ninguna.
     addSectionBar('Evidencias fotográficas');
     const evidenceHeight = 62;
     const evidenceWidth = (contentWidth - 6) / 2;
-    const drawEvidenceBox = (x: number, title: string, image: string | null) => {
+    const drawEvidenceBox = (x: number, y: number, caption: string | undefined, image: string | null) => {
       doc.setFillColor(248, 250, 252);
       doc.setDrawColor(203, 213, 225);
-      doc.roundedRect(x, yPosition, evidenceWidth, evidenceHeight, 2, 2, 'FD');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor(15, 23, 42);
-      doc.text(title, x + 4, yPosition + 7);
+      doc.roundedRect(x, y, evidenceWidth, evidenceHeight, 2, 2, 'FD');
       if (image) {
         try {
-          doc.addImage(image, x + 4, yPosition + 10, evidenceWidth - 8, evidenceHeight - 14);
-          return;
+          doc.addImage(image, x + 3, y + 3, evidenceWidth - 6, evidenceHeight - 6);
         } catch {
-          // fall through to placeholder text below
+          doc.setFont('helvetica', 'italic');
+          doc.setFontSize(8);
+          doc.setTextColor(148, 163, 184);
+          doc.text('No se pudo cargar la imagen', x + evidenceWidth / 2, y + evidenceHeight / 2, { align: 'center' });
         }
+      } else {
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.setTextColor(148, 163, 184);
+        doc.text('Sin imagen registrada', x + evidenceWidth / 2, y + evidenceHeight / 2, { align: 'center' });
       }
-      doc.setFont('helvetica', 'italic');
-      doc.setFontSize(8);
-      doc.setTextColor(148, 163, 184);
-      doc.text('Sin imagen registrada', x + evidenceWidth / 2, yPosition + evidenceHeight / 2, { align: 'center' });
+      if (caption) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor(71, 85, 105);
+        doc.text(caption, x + evidenceWidth / 2, y + evidenceHeight + 4, { align: 'center', maxWidth: evidenceWidth });
+      }
     };
 
-    if (resolvedEvidence.length > 0) {
-      resolvedEvidence.forEach((item, index) => {
-        ensureSpace(evidenceHeight + 10);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8.5);
-        doc.setTextColor(15, 23, 42);
-        doc.text(item.title || `Registro fotográfico ${index + 1}`, margin, yPosition + 3);
-        yPosition += 6;
-        drawEvidenceBox(margin, 'Antes', item.before);
-        drawEvidenceBox(margin + evidenceWidth + 6, 'Después', item.after);
-        yPosition += evidenceHeight + 6;
-      });
+    const evidenceByType = (['BEFORE', 'AFTER', 'EVIDENCE'] as const).map((type) => ({
+      type,
+      photos: resolvedEvidence.filter((item) => item.type === type),
+    }));
+    const hasAnyEvidence = evidenceByType.some((group) => group.photos.length > 0);
+
+    if (!hasAnyEvidence) {
+      ensureSpace(16);
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(9);
+      doc.setTextColor(148, 163, 184);
+      doc.text('Sin evidencia fotográfica registrada.', margin, yPosition + 4);
+      yPosition += 12;
     } else {
-      ensureSpace(evidenceHeight + 4);
-      drawEvidenceBox(margin, 'Antes', null);
-      drawEvidenceBox(margin + evidenceWidth + 6, 'Después', null);
-      yPosition += evidenceHeight + 6;
+      for (const group of evidenceByType) {
+        if (group.photos.length === 0) continue;
+
+        ensureSpace(10);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor(15, 23, 42);
+        doc.text(EVIDENCE_TYPE_LABELS[group.type], margin, yPosition + 4);
+        yPosition += 8;
+
+        for (let i = 0; i < group.photos.length; i += 2) {
+          ensureSpace(evidenceHeight + 10);
+          const rowPhotos = group.photos.slice(i, i + 2);
+          drawEvidenceBox(margin, yPosition, rowPhotos[0].title, rowPhotos[0].image);
+          if (rowPhotos[1]) {
+            drawEvidenceBox(margin + evidenceWidth + 6, yPosition, rowPhotos[1].title, rowPhotos[1].image);
+          }
+          yPosition += evidenceHeight + 10;
+        }
+      }
     }
 
     // ---- Firmas ----

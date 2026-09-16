@@ -22,14 +22,25 @@ type MaintenanceOption = {
   maintenance_date?: string | null;
 };
 
-type EvidencePair = {
+type EvidenceType = "BEFORE" | "AFTER" | "EVIDENCE";
+
+type EvidencePhoto = {
   title: string;
-  beforeUrl: string;
-  afterUrl: string;
+  url: string;
+  type: EvidenceType;
+};
+
+const EVIDENCE_TYPE_LABELS: Record<EvidenceType, string> = {
+  BEFORE: "Antes",
+  AFTER: "Después",
+  EVIDENCE: "Evidencia",
 };
 
 const MAX_EVIDENCE_MB = 8;
-const MAX_EVIDENCE_PAIRS = 6;
+// Antes eran "6 pares" (Antes+Después) = 12 fotos como tope real. Ahora que
+// cada foto es independiente (no forma parejas), el tope se expresa
+// directamente en fotos individuales mantiene el mismo máximo real de 12.
+const MAX_EVIDENCE_ITEMS = 12;
 
 /**
  * Evidence photos upload straight from the browser to Storage (see the
@@ -184,7 +195,7 @@ export function TechnicalReportForm({ companyId }: Props) {
     observations: "",
     recommendations: "",
   });
-  const [evidencePairs, setEvidencePairs] = useState<EvidencePair[]>([{ title: "", beforeUrl: "", afterUrl: "" }]);
+  const [evidencePhotos, setEvidencePhotos] = useState<EvidencePhoto[]>([]);
 
   const supabase = createClient();
 
@@ -224,34 +235,42 @@ export function TechnicalReportForm({ companyId }: Props) {
         workActivity: result.maintenance.title || prev.workActivity,
         observations: result.maintenance.observations || prev.observations,
       }));
+      // El mantenimiento seleccionado puede traer su propio Antes/Después
+      // (maintenance_records.evidence_before_url/after_url, un campo previo
+      // y más simple que la evidencia del informe técnico). Se agregan como
+      // fotos independientes con su tipo correspondiente - reemplazando solo
+      // las que se hayan agregado automáticamente antes (para no duplicar si
+      // el usuario cambia de mantenimiento varias veces), nunca las que el
+      // usuario subió a mano.
+      const autoTitle = "Evidencia del mantenimiento";
       if (result.maintenance.evidenceBeforeUrl || result.maintenance.evidenceAfterUrl) {
-        setEvidencePairs((prev) => {
-          const next = [...prev];
-          next[0] = {
-            title: next[0]?.title || "Evidencia del mantenimiento",
-            beforeUrl: result.maintenance.evidenceBeforeUrl || next[0]?.beforeUrl || "",
-            afterUrl: result.maintenance.evidenceAfterUrl || next[0]?.afterUrl || "",
-          };
-          return next;
+        setEvidencePhotos((prev) => {
+          const manual = prev.filter((p) => p.title !== autoTitle);
+          const auto: EvidencePhoto[] = [];
+          if (result.maintenance.evidenceBeforeUrl) {
+            auto.push({ title: autoTitle, url: result.maintenance.evidenceBeforeUrl, type: "BEFORE" });
+          }
+          if (result.maintenance.evidenceAfterUrl) {
+            auto.push({ title: autoTitle, url: result.maintenance.evidenceAfterUrl, type: "AFTER" });
+          }
+          return [...auto, ...manual].slice(0, MAX_EVIDENCE_ITEMS);
         });
       }
     }
   };
 
-  const addEvidencePair = () => {
-    setEvidencePairs((prev) => (prev.length >= MAX_EVIDENCE_PAIRS ? prev : [...prev, { title: "", beforeUrl: "", afterUrl: "" }]));
+  const addEvidencePhoto = () => {
+    // El tipo por defecto es "Evidencia": es el caso más genérico y no debe
+    // obligar a la persona a pensar en Antes/Después antes de subir la foto.
+    setEvidencePhotos((prev) => (prev.length >= MAX_EVIDENCE_ITEMS ? prev : [...prev, { title: "", url: "", type: "EVIDENCE" }]));
   };
 
-  const removeEvidencePair = (index: number) => {
-    setEvidencePairs((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)));
+  const removeEvidencePhoto = (index: number) => {
+    setEvidencePhotos((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const updateEvidenceUrl = (index: number, field: "beforeUrl" | "afterUrl", url: string) => {
-    setEvidencePairs((prev) => {
-      const next = [...prev];
-      next[index] = { ...next[index], [field]: url };
-      return next;
-    });
+  const updateEvidencePhoto = (index: number, patch: Partial<EvidencePhoto>) => {
+    setEvidencePhotos((prev) => prev.map((photo, i) => (i === index ? { ...photo, ...patch } : photo)));
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -265,11 +284,15 @@ export function TechnicalReportForm({ companyId }: Props) {
       if (value) formData.set(key, value);
     });
     if (selectedMaintenanceId) formData.set("maintenanceId", selectedMaintenanceId);
-    formData.set("evidenceCount", String(evidencePairs.length));
-    evidencePairs.forEach((pair, index) => {
-      formData.set(`evidenceTitle_${index}`, pair.title);
-      formData.set(`evidenceBeforeUrl_${index}`, pair.beforeUrl);
-      formData.set(`evidenceAfterUrl_${index}`, pair.afterUrl);
+    // Solo las fotos que realmente tienen una imagen subida viajan al
+    // servidor - una fila agregada y luego dejada vacía (o cuya subida
+    // falló) no debe generar un item de evidencia sin imagen.
+    const photosToSubmit = evidencePhotos.filter((photo) => photo.url);
+    formData.set("evidenceCount", String(photosToSubmit.length));
+    photosToSubmit.forEach((photo, index) => {
+      formData.set(`evidenceTitle_${index}`, photo.title);
+      formData.set(`evidenceUrl_${index}`, photo.url);
+      formData.set(`evidenceType_${index}`, photo.type);
     });
 
     try {
@@ -456,41 +479,58 @@ export function TechnicalReportForm({ companyId }: Props) {
 
             <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold">Evidencias fotográficas (antes / después)</p>
-                <Button type="button" size="sm" variant="outline" onClick={addEvidencePair} disabled={evidencePairs.length >= MAX_EVIDENCE_PAIRS}>
-                  <Plus className="mr-1 h-3.5 w-3.5" /> Agregar evidencia
+                <div>
+                  <p className="text-sm font-semibold">Evidencia fotográfica</p>
+                  <p className="text-xs text-muted-foreground">
+                    Agrega las fotos que necesites y marca cada una como Antes, Después o Evidencia. No es obligatorio
+                    formar parejas Antes/Después.
+                  </p>
+                </div>
+                <Button type="button" size="sm" variant="outline" onClick={addEvidencePhoto} disabled={evidencePhotos.length >= MAX_EVIDENCE_ITEMS}>
+                  <Plus className="mr-1 h-3.5 w-3.5" /> Agregar foto
                 </Button>
               </div>
-              {evidencePairs.map((pair, index) => (
+              {evidencePhotos.length === 0 ? (
+                <p className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
+                  Aún no has agregado fotos. Usa &quot;Agregar foto&quot; para empezar.
+                </p>
+              ) : null}
+              {evidencePhotos.map((photo, index) => (
                 <div key={index} className="space-y-2 rounded-md border bg-background p-3">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Input
-                      placeholder={`Título del registro ${index + 1} (opcional)`}
-                      value={pair.title}
-                      onChange={(e) =>
-                        setEvidencePairs((prev) => prev.map((p, i) => (i === index ? { ...p, title: e.target.value } : p)))
-                      }
+                      className="flex-1"
+                      placeholder={`Título de la foto ${index + 1} (opcional)`}
+                      value={photo.title}
+                      onChange={(e) => updateEvidencePhoto(index, { title: e.target.value })}
                     />
-                    {evidencePairs.length > 1 ? (
-                      <Button type="button" size="sm" variant="ghost" onClick={() => removeEvidencePair(index)}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    ) : null}
+                    <div className="space-y-1">
+                      <Label htmlFor={`evidence-type-${index}`} className="sr-only">
+                        Tipo de foto {index + 1}
+                      </Label>
+                      <select
+                        id={`evidence-type-${index}`}
+                        value={photo.type}
+                        onChange={(e) => updateEvidencePhoto(index, { type: e.target.value as EvidenceType })}
+                        className="flex h-10 w-36 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {(Object.keys(EVIDENCE_TYPE_LABELS) as EvidenceType[]).map((type) => (
+                          <option key={type} value={type}>
+                            {EVIDENCE_TYPE_LABELS[type]}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <Button type="button" size="sm" variant="ghost" onClick={() => removeEvidencePhoto(index)}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
                   </div>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <EvidencePicker
-                      label="Imagen antes"
-                      companyId={companyId}
-                      initialUrl={pair.beforeUrl}
-                      onUploaded={(url) => updateEvidenceUrl(index, "beforeUrl", url)}
-                    />
-                    <EvidencePicker
-                      label="Imagen después"
-                      companyId={companyId}
-                      initialUrl={pair.afterUrl}
-                      onUploaded={(url) => updateEvidenceUrl(index, "afterUrl", url)}
-                    />
-                  </div>
+                  <EvidencePicker
+                    label={`Foto (${EVIDENCE_TYPE_LABELS[photo.type]})`}
+                    companyId={companyId}
+                    initialUrl={photo.url}
+                    onUploaded={(url) => updateEvidencePhoto(index, { url })}
+                  />
                 </div>
               ))}
             </div>
@@ -524,7 +564,7 @@ export function TechnicalReportForm({ companyId }: Props) {
       <Card className="bg-slate-50">
         <CardHeader>
           <CardTitle>Documento entregable al cliente</CardTitle>
-          <CardDescription>Logo, encabezado, información del cliente y del proyecto, evidencias antes/después, firmas y pie de página corporativo.</CardDescription>
+          <CardDescription>Logo, encabezado, información del cliente y del proyecto, evidencia fotográfica, firmas y pie de página corporativo.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
           <p>• Se integra con activos, mantenimientos, usuarios y empresas.</p>

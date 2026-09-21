@@ -193,7 +193,6 @@ export function TechnicalReportForm({ companyId }: Props) {
     materialsUsed: "",
     sparePartsUsed: "",
     observations: "",
-    recommendations: "",
   });
   const [evidencePhotos, setEvidencePhotos] = useState<EvidencePhoto[]>([]);
 
@@ -470,11 +469,6 @@ export function TechnicalReportForm({ companyId }: Props) {
             <div className="space-y-2">
               <Label htmlFor="observations">Observaciones</Label>
               <textarea id="observations" name="observations" rows={3} className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={formState.observations} onChange={(e) => setFormState((prev) => ({ ...prev, observations: e.target.value }))} />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="recommendations">Recomendaciones</Label>
-              <textarea id="recommendations" name="recommendations" rows={3} className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={formState.recommendations} onChange={(e) => setFormState((prev) => ({ ...prev, recommendations: e.target.value }))} />
             </div>
 
             <div className="space-y-3 rounded-lg border bg-muted/30 p-3">

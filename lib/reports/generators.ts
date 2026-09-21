@@ -493,7 +493,6 @@ export type TechnicalReportData = {
   materialsUsed?: string;
   sparePartsUsed?: string;
   observations?: string;
-  recommendations?: string;
   evidenceItems?: TechnicalReportEvidenceItem[];
   technicalSignatureImage?: string | null;
   technicalSignatureName?: string;
@@ -707,7 +706,6 @@ export async function generateTechnicalPdf(
     addParagraphSection('Materiales utilizados', reportData.materialsUsed || '');
     addParagraphSection('Repuestos utilizados', reportData.sparePartsUsed || '');
     addParagraphSection('Observaciones', reportData.observations || '');
-    addParagraphSection('Recomendaciones', reportData.recommendations || '');
 
     // ---- Evidencias fotográficas ----
     // Antes esta sección siempre dibujaba dos cajas fijas "Antes"/"Después"

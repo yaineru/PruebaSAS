@@ -2,7 +2,7 @@
 
 import { startTransition, useActionState, useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Save } from "lucide-react";
+import { CloudOff, Plus, Save } from "lucide-react";
 import {
   createTenantRecord,
   updateTenantRecord,
@@ -13,9 +13,23 @@ import { createClient } from "@/lib/supabase/browser";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useConnectivity } from "@/lib/offline/connectivity";
+import { useOffline } from "@/components/offline-provider";
+import { getOfflineDb, type QueueOperationType } from "@/lib/offline/db";
 
 const initialState: TenantRecordActionState = {
   success: false
+};
+
+// Solo creación (no edición, no borrado) - ver reporte de la Fase 1 de modo
+// offline: registrar información nueva en campo es el caso real reportado
+// por el cliente; editar/eliminar offline abre preguntas de conflicto
+// (¿qué pasa si alguien más ya cambió ese mismo registro?) que quedan fuera
+// de este alcance a propósito.
+const OFFLINE_CREATE_TABLE_TYPES: Partial<Record<ModuleKey, QueueOperationType>> = {
+  maintenance_records: "CREATE_MAINTENANCE",
+  incidents: "CREATE_INCIDENT",
+  assets: "CREATE_ASSET"
 };
 
 type TenantRecordFormProps = {
@@ -59,7 +73,11 @@ export function TenantRecordForm({
   const supabase = createClient();
   const [clientError, setClientError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [offlineMessage, setOfflineMessage] = useState<string | null>(null);
   const [state, formAction, pending] = useActionState(isEdit ? updateTenantRecord : createTenantRecord, initialState);
+  const { isOnline } = useConnectivity();
+  const { scopeKey } = useOffline();
+  const offlineOperationType = OFFLINE_CREATE_TABLE_TYPES[table];
 
   useEffect(() => {
     if (!state.success) return;
@@ -69,6 +87,57 @@ export function TenantRecordForm({
   }, [router, state.success, isEdit, onSuccess]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    setOfflineMessage(null);
+
+    // Editar sin conexión no está soportado todavía (ver manual): la Server
+    // Action de todos modos fallaría con un error de red confuso, así que se
+    // corta antes con un mensaje claro en vez de dejar que eso pase.
+    if (isEdit && !isOnline) {
+      event.preventDefault();
+      setClientError("No se pueden guardar cambios sin conexión todavía. Intenta de nuevo cuando vuelva la señal.");
+      return;
+    }
+
+    // Documentos requiere subir el archivo a Storage antes de poder crear el
+    // registro (ver más abajo) - eso necesita conexión sí o sí, así que se
+    // avisa de una vez en vez de dejar que el intento de subida falle solo.
+    if (!isEdit && table === "asset_documents" && !isOnline) {
+      event.preventDefault();
+      setClientError("No se pueden cargar documentos sin conexión. Intenta de nuevo cuando vuelva la señal.");
+      return;
+    }
+
+    if (!isEdit && offlineOperationType && !isOnline) {
+      event.preventDefault();
+      setClientError(null);
+      const form = event.currentTarget;
+      const formData = new FormData(form);
+
+      const payload: Record<string, unknown> = { __redirectTo: redirectTo };
+      for (const field of fields) {
+        const raw = formData.get(field.name);
+        if (raw !== null && raw !== "") payload[field.name] = String(raw);
+      }
+      const summaryField = fields[0]?.name;
+      const summary = summaryField ? String(formData.get(summaryField) || "Registro sin título") : "Registro";
+
+      const db = getOfflineDb(scopeKey);
+      await db.operations.add({
+        id: crypto.randomUUID(),
+        type: offlineOperationType,
+        payload,
+        status: "PENDING",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        attempts: 0,
+        summary
+      });
+
+      setOfflineMessage("Guardado sin conexión. Se sincronizará automáticamente cuando vuelva Internet.");
+      form.reset();
+      return;
+    }
+
     if (table !== "asset_documents" || isEdit) return;
 
     event.preventDefault();
@@ -133,6 +202,13 @@ export function TenantRecordForm({
         </div>
       ) : null}
 
+      {offlineMessage ? (
+        <div className="mb-4 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          <CloudOff className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{offlineMessage}</span>
+        </div>
+      ) : null}
+
       {state.success && state.message ? (
         <div className="mb-4 rounded-md border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-700">
           {state.message}
@@ -190,8 +266,14 @@ export function TenantRecordForm({
           </div>
         ))}
         <Button className="w-full" disabled={pending || uploading}>
-          {isEdit ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-          {pending || uploading ? "Guardando..." : isEdit ? "Guardar cambios" : "Crear"}
+          {!isOnline && offlineOperationType ? <CloudOff className="h-4 w-4" /> : isEdit ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+          {pending || uploading
+            ? "Guardando..."
+            : !isOnline && offlineOperationType
+              ? "Guardar sin conexión"
+              : isEdit
+                ? "Guardar cambios"
+                : "Crear"}
         </Button>
       </form>
     </div>

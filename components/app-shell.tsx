@@ -17,18 +17,21 @@ import { getCompanySettings, getVisibleModules } from "@/lib/company-settings";
 import { Button } from "@/components/ui/button";
 import { getTenantContext } from "@/lib/tenant";
 import { NotificationBell } from "@/components/notification-bell";
+import { OfflineProvider } from "@/components/offline-provider";
+import { ConnectivityIndicator } from "@/components/connectivity-indicator";
 
 export async function AppShell({ children }: { children: React.ReactNode }) {
   const tenant = await getTenantContext();
   const settings = await getCompanySettings(tenant.companyId, tenant.companyName);
   const visibleModules = getVisibleModules(settings);
-  const mobileItems = visibleModules.slice(0, 6).map((module) => ({ 
-    href: module.href, 
-    label: module.title.slice(0, 8), 
-    icon: module.icon 
+  const mobileItems = visibleModules.slice(0, 6).map((module) => ({
+    href: module.href,
+    label: module.title.slice(0, 8),
+    icon: module.icon
   }));
 
   return (
+    <OfflineProvider authUserId={tenant.authUserId} companyId={tenant.companyId}>
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-30 border-b bg-background/95 backdrop-blur lg:hidden">
         <div className="flex h-14 items-center justify-between px-4">
@@ -37,6 +40,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
             <span className="truncate font-semibold">EmpresaOS</span>
           </div>
           <div className="flex items-center gap-1">
+            <ConnectivityIndicator />
             <NotificationBell companyId={tenant.companyId} />
             <form action={signOut}>
               <Button size="icon" variant="ghost" aria-label="Cerrar sesión">
@@ -69,6 +73,9 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
                 <p className="truncate text-sm text-muted-foreground">{settings.companyName}</p>
               </div>
             </Link>
+            <div className="mt-3">
+              <ConnectivityIndicator />
+            </div>
           </div>
           <nav className="flex-1 space-y-1 p-3">
             <Link className="block rounded-md px-3 py-2 text-sm font-medium hover:bg-muted" href="/dashboard">
@@ -188,5 +195,6 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         ))}
       </nav>
     </div>
+    </OfflineProvider>
   );
 }

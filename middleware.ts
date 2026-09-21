@@ -54,11 +54,15 @@ export async function middleware(request: NextRequest) {
   // lives at "/dashboard". /privacidad and /terminos are the minimum legal
   // pages, linked from the landing/register footer, and must be readable by
   // an anonymous visitor before they ever sign up.
+  // /offline es el respaldo del Service Worker (public/sw.js) cuando no hay
+  // red y la página pedida nunca se cacheó - debe poder mostrarse sin
+  // depender de sesión, igual que /offline no depende de ningún dato.
   const isPublicRoute =
     request.nextUrl.pathname === "/" ||
     request.nextUrl.pathname.startsWith("/calendar/public") ||
     request.nextUrl.pathname === "/privacidad" ||
-    request.nextUrl.pathname === "/terminos";
+    request.nextUrl.pathname === "/terminos" ||
+    request.nextUrl.pathname === "/offline";
   const isAppRoute = !isAuthRoute && !isPublicRoute && !request.nextUrl.pathname.startsWith("/api");
 
   if (!user && isAppRoute) {
@@ -81,6 +85,10 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"
+    // sw.js debe poder pedirse y actualizarse sin pasar por el chequeo de
+    // sesión - un visitante sin sesión (o cuya sesión expiró justo mientras
+    // estaba sin señal) igual necesita poder registrar/actualizar el Service
+    // Worker que hace posible abrir la app sin conexión la próxima vez.
+    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|robots.txt|sitemap.xml|sw.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"
   ]
 };

@@ -3,7 +3,7 @@
 
 Guía de uso de la plataforma EmpresaOS para el personal de Progrúas. Documenta únicamente funciones que existen hoy en el sistema, verificadas contra el código fuente. Donde una función esperable todavía no existe, se indica explícitamente como **"Limitación actual de la plataforma"**.
 
-Última verificación de contenido: 2026-09-08.
+Última verificación de contenido: 2026-09-21.
 
 ---
 
@@ -20,11 +20,12 @@ Guía de uso de la plataforma EmpresaOS para el personal de Progrúas. Documenta
 9. [Usuarios y roles](#9-usuarios-y-roles)
 10. [Informes](#10-informes)
 11. [Informes técnicos](#11-informes-técnicos)
-12. [Configuración](#12-configuración)
-13. [Casos prácticos](#13-casos-prácticos)
-14. [Problemas frecuentes](#14-problemas-frecuentes)
-15. [Buenas prácticas](#15-buenas-prácticas)
-16. [Glosario](#16-glosario)
+12. [Modo sin conexión (offline)](#12-modo-sin-conexión-offline)
+13. [Configuración](#13-configuración)
+14. [Casos prácticos](#14-casos-prácticos)
+15. [Problemas frecuentes](#15-problemas-frecuentes)
+16. [Buenas prácticas](#16-buenas-prácticas)
+17. [Glosario](#17-glosario)
 
 ---
 
@@ -227,7 +228,35 @@ Debajo, tres gráficos (estado de equipos, mantenimientos por mes, novedades por
 
 **Cómo se descarga**: se genera en PDF y aparece automáticamente en el historial de "Informes" (marcado "Informe técnico"), desde donde se ve, descarga o envía por correo igual que cualquier otro informe.
 
-## 12. Configuración
+## 12. Modo sin conexión (offline)
+
+**Para qué sirve**: permitir que el personal de campo (obra, taller, zona sin señal) siga trabajando cuando no hay Internet, y que lo registrado se sincronice solo apenas vuelva la conexión.
+
+**No prometemos "todo funciona sin Internet"**. Esto es exactamente lo que hoy funciona y lo que no:
+
+**Disponible sin conexión:**
+- Ver los **Equipos**, **Mantenimientos**, **Novedades**, **Panel general** y demás páginas que haya visitado antes mientras tenía señal (se muestra la última versión guardada en el dispositivo).
+- Registrar un **nuevo mantenimiento** o una **nueva novedad**: el formulario se completa y se guarda igual que siempre.
+
+**Requiere conexión (no disponible sin Internet):**
+- Crear o editar un **Equipo**.
+- Cargar **Documentos**, adjuntar archivos a un **Equipo** (`asset_documents`).
+- Crear o generar un **Informe** o un **Informe técnico** (incluidas las fotos de evidencia y las firmas) — esto se documenta como limitación actual: no fuerce la generación offline; espere a tener señal.
+- Cualquier módulo no mencionado arriba (Documentos, Obras, Usuarios, Configuración, etc.).
+
+**Cómo saber si hay conexión**: un indicador pequeño y siempre visible, junto al nombre de su empresa, muestra el estado real (no solo si el teléfono "cree" tener señal):
+- 🟢 **En línea** — todo se guarda directo en el servidor, como siempre.
+- 🟠 **Sin conexión** — los cambios que haga ahora (mantenimientos, novedades) se guardan **en este dispositivo** y el botón de guardar dice "Guardar sin conexión".
+- 🔵 **Sincronizando** — se está enviando al servidor lo que quedó pendiente.
+- El indicador puede mostrar también cuántos registros están **pendientes de sincronización**, y ofrece un botón para **reintentar** si algún envío falló.
+
+**Qué pasa cuando guarda sin conexión**: el registro queda marcado como **"Pendiente de sincronización"** y aparece en una lista bajo el formulario, en este mismo dispositivo. No se pierde si cierra la pestaña o la aplicación — al volver a abrirla, sigue ahí. Apenas la aplicación detecta conexión real (no basta con que el teléfono "diga" que hay wifi), sincroniza automáticamente, sin que tenga que hacer nada. Si por alguna razón la sincronización falla (ej. la señal se corta a mitad de camino), el registro pasa a **"Falló - reintentar"** y puede tocarlo para intentarlo de nuevo; nunca se pierde y nunca se duplica, aunque guarde dos veces o se reintente varias veces.
+
+**Importante para dispositivos compartidos**: lo guardado sin conexión queda asociado a la empresa y el usuario que lo creó. Si otra persona inicia sesión con otra cuenta en el mismo teléfono/computador, no verá ni podrá sincronizar lo que usted dejó pendiente.
+
+**Limitación actual conocida**: los Informes técnicos (con fotos y firmas) todavía no se pueden crear sin conexión; quedan para una siguiente fase de esta función. Si necesita levantar un informe técnico en campo sin señal, tome los datos y complételo en la plataforma apenas recupere conexión.
+
+## 13. Configuración
 
 Opciones disponibles para Progrúas:
 
@@ -239,7 +268,7 @@ Opciones disponibles para Progrúas:
 - **Programación de informes** — solo Administrador (ver limitación en sección 10).
 - **Agenda**: calendario mensual/semanal/diario. Cree actividades con título, fecha/hora, tipo (con color), responsable, ubicación, descripción y recordatorios (15 min, 30 min, 1 hora o 1 día antes). Puede arrastrar una actividad sobre el calendario para reprogramarla. Puede compartir su disponibilidad mediante un enlace público o un feed `.ics` importable en otros calendarios.
 
-## 13. Casos prácticos
+## 14. Casos prácticos
 
 **Caso 1 — Registrar un nuevo equipo**
 1. Entrar a "Equipos".
@@ -279,7 +308,7 @@ Opciones disponibles para Progrúas:
 4. Agregar fotos de evidencia y firmas.
 5. Generar; aparece en "Informes" como "Informe técnico".
 
-## 14. Problemas frecuentes
+## 15. Problemas frecuentes
 
 **¿Qué hago si...?**
 
@@ -293,8 +322,11 @@ Opciones disponibles para Progrúas:
 - **Aparece un mensaje de error al guardar**: revise que los campos obligatorios estén completos y que no repita un código de equipo ya existente.
 - **¿Puedo recuperar un registro eliminado?**: no desde la interfaz. La eliminación es permanente.
 - **No veo el botón para conectar Google Calendar**: falta configuración técnica de credenciales de Google por parte del proveedor; no afecta al resto del sistema.
+- **El indicador dice "Sin conexión" pero tengo wifi**: la wifi puede estar conectada sin salida real a Internet (portal cautivo, red de obra restringida); la plataforma verifica conexión real, no solo si el dispositivo tiene una red activa. Espere unos segundos; el chequeo se repite automáticamente.
+- **Un registro quedó "Pendiente de sincronización" mucho tiempo**: revise que realmente haya señal; toque el indicador para reintentar manualmente. El registro no se pierde mientras no lo borre del dispositivo.
+- **Un registro pasó a "Falló - reintentar"**: toque para reintentar; si persiste, verifique la conexión y que el equipo relacionado siga existiendo.
 
-## 15. Buenas prácticas
+## 16. Buenas prácticas
 
 - Use un código interno único y consistente para cada equipo (ej. "EQ-001", "EQ-002").
 - Actualice el estado del equipo cada vez que cambie su situación real.
@@ -304,8 +336,10 @@ Opciones disponibles para Progrúas:
 - Evite crear equipos u obras duplicadas — use la búsqueda antes de registrar uno nuevo.
 - Use siempre los mismos filtros/formato al generar informes recurrentes, para mantener consistencia.
 - Configure sus preferencias de correo para no perderse alertas de vencimientos o novedades.
+- En campo, si no tiene señal, registre igual el mantenimiento o la novedad — no espere a tener Internet; se sincroniza solo.
+- Antes de salir a una zona sin señal, visite una vez las páginas de Equipos/Mantenimientos/Novedades con conexión, para que la información quede disponible en el dispositivo mientras esté offline.
 
-## 16. Glosario
+## 17. Glosario
 
 - **Activo relacionado**: el equipo al que pertenece un mantenimiento, documento o novedad.
 - **Horómetro**: horas acumuladas de uso de un equipo.
@@ -313,3 +347,6 @@ Opciones disponibles para Progrúas:
 - **SMTP**: protocolo de correo saliente; configurarlo permite que informes y notificaciones salgan desde el propio correo de la empresa.
 - **Webhook**: notificación automática hacia un sistema externo cuando ocurre un evento en la plataforma.
 - **Super administrador**: rol técnico reservado al equipo que opera la plataforma; no se asigna a personal de Progrúas.
+- **Pendiente de sincronización**: registro guardado sin conexión, en este dispositivo, que todavía no llegó al servidor.
+- **Sincronizando**: la aplicación está enviando al servidor los registros pendientes de este dispositivo.
+- **Modo sin conexión / offline**: ver sección 12.

@@ -51,6 +51,17 @@ const uniqueConstraintMessages: Record<string, string> = {
   projects_company_id_code_key: "Ya existe una obra con ese código en tu empresa."
 };
 
+// Ver 043_offline_sync_idempotency.sql: la cola offline (lib/offline/*) envía
+// un client_op_id generado en el dispositivo. Si la sincronización se
+// reintenta (ej. la respuesta se perdió por una caída de red justo después
+// de que el insert original tuvo éxito), este mismo id vuelve a viajar - la
+// restricción única por (company_id, client_op_id) hace que Postgres
+// rechace el segundo insert con 23505 en vez de duplicar la fila, y estas
+// tablas son las únicas donde ese 23505 específico significa "ya estaba
+// sincronizado" (éxito), no un error real.
+const IDEMPOTENT_TABLES = new Set(["maintenance_records", "incidents", "assets"]);
+const clientOpIdSchema = z.string().uuid().optional();
+
 function failure(error: string): TenantRecordActionState {
   return { success: false, error };
 }
@@ -298,6 +309,17 @@ export async function createTenantRecord(
       payload.uploaded_at = new Date().toISOString();
     }
 
+    let clientOpId: string | undefined;
+    if (IDEMPOTENT_TABLES.has(parsed.table)) {
+      const rawClientOpId = formData.get("client_op_id");
+      const clientOpIdResult = clientOpIdSchema.safeParse(rawClientOpId ? String(rawClientOpId) : undefined);
+      if (!clientOpIdResult.success) {
+        return failure("Identificador de sincronización inválido.");
+      }
+      clientOpId = clientOpIdResult.data;
+      if (clientOpId) payload.client_op_id = clientOpId;
+    }
+
     const { error } = await supabase.from(parsed.table).insert({
       ...payload,
       company_id: tenant.companyId,
@@ -305,6 +327,22 @@ export async function createTenantRecord(
     });
 
     if (error) {
+      const isIdempotentReplay =
+        error.code === UNIQUE_VIOLATION_CODE &&
+        clientOpId !== undefined &&
+        error.message.includes("client_op_key");
+
+      if (isIdempotentReplay) {
+        // No es un duplicado real: este mismo registro (mismo client_op_id)
+        // ya se sincronizó en un intento anterior. Responder éxito evita que
+        // la cola offline lo reintente para siempre o, peor, que un humano
+        // vea "error" cuando en realidad ya está guardado.
+        console.warn("Tenant record idempotent replay detected", { table: parsed.table, clientOpId });
+        await trackAnalyticsEvent(`CREATE_${parsed.table.toUpperCase()}`);
+        revalidatePath(parsed.redirectTo);
+        return { success: true, message: "Sincronizado correctamente." };
+      }
+
       console.error("Tenant record insert failed", {
         table: parsed.table,
         code: error.code,

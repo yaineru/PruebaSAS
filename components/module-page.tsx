@@ -15,6 +15,8 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { DocumentActions } from "@/components/document-actions";
 import { TenantRecordForm } from "@/components/tenant-record-form";
+import { PendingOperationsList } from "@/components/pending-operations-list";
+import type { QueueOperationType } from "@/lib/offline/db";
 import { TenantRecordDeleteButton } from "@/components/tenant-record-delete-button";
 import { TenantRecordEditButton } from "@/components/tenant-record-edit-button";
 import {
@@ -27,6 +29,12 @@ import {
 } from "@/components/ui/table";
 
 type TenantRow = Record<string, string | number | null>;
+
+const OFFLINE_QUEUE_TYPE_BY_TABLE: Partial<Record<ModuleKey, QueueOperationType>> = {
+  maintenance_records: "CREATE_MAINTENANCE",
+  incidents: "CREATE_INCIDENT",
+  assets: "CREATE_ASSET"
+};
 
 export async function ModulePage({
   module,
@@ -160,6 +168,11 @@ export async function ModulePage({
               companyName={settings.companyName}
               companyId={tenant.companyId}
             />
+            {OFFLINE_QUEUE_TYPE_BY_TABLE[visibleModule.table as ModuleKey] ? (
+              <div className="mt-4">
+                <PendingOperationsList operationType={OFFLINE_QUEUE_TYPE_BY_TABLE[visibleModule.table as ModuleKey]!} />
+              </div>
+            ) : null}
           </CardContent>
         </Card>
 

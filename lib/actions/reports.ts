@@ -72,6 +72,34 @@ export async function generateReport(formData: FormData) {
 
     const supabase = await createClient();
 
+    // Modo offline (lib/offline/*): la solicitud de informe se guarda en el
+    // dispositivo y esta acción se reintenta al recuperar conexión, con el
+    // mismo client_op_id generado una sola vez. Si ya existe un informe con
+    // este (company_id, client_op_id) - ej. la respuesta se perdió después de
+    // que el intento anterior sí terminara - se devuelve ese informe ya
+    // generado en vez de correr todo el pipeline (consulta + PDF/Excel +
+    // Storage) por segunda vez.
+    const clientOpIdRaw = formData.get('client_op_id');
+    const clientOpId = clientOpIdRaw ? String(clientOpIdRaw) : undefined;
+    if (clientOpId) {
+      const { data: existing } = await supabase
+        .from('generated_reports')
+        .select('id, file_url, file_path, file_size_bytes')
+        .eq('company_id', companyId)
+        .eq('client_op_id', clientOpId)
+        .maybeSingle();
+
+      if (existing) {
+        return {
+          success: true,
+          reportId: existing.id,
+          downloadUrl: existing.file_url || existing.file_path || '',
+          fileSize: existing.file_size_bytes || undefined,
+          message: 'Informe generado correctamente.',
+        };
+      }
+    }
+
     // Get company info
     const { data: company } = await supabase
       .from('companies')
@@ -234,6 +262,7 @@ export async function generateReport(formData: FormData) {
 
     const insertPayload = {
       company_id: companyId,
+      client_op_id: clientOpId || null,
       report_type: validated.reportEntity,
       report_entity: validated.reportEntity,
       report_format: validated.reportFormat,
@@ -259,6 +288,28 @@ export async function generateReport(formData: FormData) {
       .insert(insertPayload as Record<string, unknown>)
       .select()
       .single();
+
+    if (reportInsertError?.code === '23505' && clientOpId && reportInsertError.message.includes('client_op_key')) {
+      // Carrera real entre dos intentos de sincronización concurrentes - el
+      // chequeo previo no la vio porque el otro intento todavía no había
+      // insertado. Se devuelve el que sí ganó la carrera en vez de duplicar.
+      const { data: existing } = await supabase
+        .from('generated_reports')
+        .select('id, file_url, file_path, file_size_bytes')
+        .eq('company_id', companyId)
+        .eq('client_op_id', clientOpId)
+        .maybeSingle();
+
+      if (existing) {
+        return {
+          success: true,
+          reportId: existing.id,
+          downloadUrl: existing.file_url || existing.file_path || '',
+          fileSize: existing.file_size_bytes || undefined,
+          message: 'Informe generado correctamente.',
+        };
+      }
+    }
 
     if (reportInsertError || !report) {
       console.error('REPORT_INSERT_ERROR', {

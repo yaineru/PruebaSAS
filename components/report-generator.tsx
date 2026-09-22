@@ -7,9 +7,12 @@ import { AdvancedFilters } from "@/components/advanced-filters";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { AlertCircle, FileJson, Loader } from "lucide-react";
+import { AlertCircle, CloudOff, FileJson, Loader } from "lucide-react";
 import type { ReportEntity } from "@/lib/reports";
 import { getTemplateColorLabel, resolveTemplateColorHex } from "@/lib/reports/color-palette";
+import { useConnectivity } from "@/lib/offline/connectivity";
+import { useOffline } from "@/components/offline-provider";
+import { getOfflineDb } from "@/lib/offline/db";
 
 type ReportTemplateOption = {
   id: string;
@@ -75,12 +78,43 @@ export function ReportGenerator({ templates = [], businessLabels = defaultLabels
   const [advancedFilters, setAdvancedFilters] = useState<Record<string, string | null>>({});
   const [showModal, setShowModal] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("standard");
+  const { isOnline } = useConnectivity();
+  const { scopeKey } = useOffline();
 
   const handleSubmit = async (formData: FormData) => {
     setIsPending(true);
     try {
+      // Los generadores de PDF/Excel dependen de sharp (binding nativo de
+      // Node) para procesar imágenes incrustadas - no pueden ejecutarse en el
+      // navegador. Sin conexión, la solicitud (tipo + formato + plantilla +
+      // filtros) se guarda y se genera en el servidor apenas vuelva Internet,
+      // en vez de fingir una generación offline que no es técnicamente viable.
+      if (!isOnline) {
+        const payload: Record<string, unknown> = {};
+        for (const [key, value] of formData.entries()) {
+          if (!(value instanceof File)) payload[key] = value;
+        }
+        const reportEntity = String(formData.get("reportEntity") || "informe");
+        const db = getOfflineDb(scopeKey);
+        await db.operations.add({
+          id: crypto.randomUUID(),
+          type: "GENERATE_REPORT",
+          payload,
+          status: "PENDING",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          attempts: 0,
+          summary: `Informe ${reportEntity} (pendiente de generación)`
+        });
+        setState({
+          success: true,
+          message: "Sin conexión: la solicitud quedó guardada y el informe se generará automáticamente cuando vuelva Internet."
+        });
+        return;
+      }
+
       const result = await generateReport(formData);
-      
+
       if (result.success) {
         setState({
           ...result,
@@ -274,11 +308,27 @@ export function ReportGenerator({ templates = [], businessLabels = defaultLabels
               </>
             )}
 
+            {!isOnline && (
+              <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-300 rounded-lg text-amber-900">
+                <CloudOff className="h-5 w-5 shrink-0" />
+                <p className="text-sm">
+                  Sin conexión: la solicitud se guardará y el informe se generará automáticamente cuando vuelva Internet.
+                </p>
+              </div>
+            )}
+
             {/* Status Messages */}
             {state.error && (
               <div className="flex items-center gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
                 <AlertCircle className="h-5 w-5 text-destructive" />
                 <p className="text-sm text-destructive">{state.error}</p>
+              </div>
+            )}
+
+            {!isOnline && state.success && state.message && (
+              <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-300 rounded-lg text-emerald-800">
+                <FileJson className="h-5 w-5 shrink-0" />
+                <p className="text-sm">{state.message}</p>
               </div>
             )}
 
@@ -293,6 +343,11 @@ export function ReportGenerator({ templates = [], businessLabels = defaultLabels
                 <>
                   <Loader className="mr-2 h-4 w-4 animate-spin" />
                   Generando informe...
+                </>
+              ) : !isOnline ? (
+                <>
+                  <CloudOff className="mr-2 h-4 w-4" />
+                  Guardar sin conexión
                 </>
               ) : (
                 <>

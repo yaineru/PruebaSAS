@@ -1,12 +1,15 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { Mail, X } from 'lucide-react';
+import { CloudOff, Mail, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { sendReportByEmail } from '@/lib/actions/reports';
+import { useConnectivity } from '@/lib/offline/connectivity';
+import { useOffline } from '@/components/offline-provider';
+import { getOfflineDb } from '@/lib/offline/db';
 
 type Props = {
   reportId: string;
@@ -22,10 +25,34 @@ export function SendReportEmailModal({ reportId, reportLabel, onClose }: Props) 
   const [cc, setCc] = useState('');
   const [subject, setSubject] = useState(`Informe: ${reportLabel}`);
   const [message, setMessage] = useState('');
+  const { isOnline } = useConnectivity();
+  const { scopeKey } = useOffline();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    // El envío real requiere un servidor SMTP alcanzable - no se puede
+    // fingir offline. La solicitud (destinatario, CC, asunto, mensaje e
+    // informe) se guarda tal cual y se envía de verdad al recuperar
+    // conexión, sin que el usuario tenga que volver a diligenciarla.
+    if (!isOnline) {
+      startTransition(async () => {
+        const db = getOfflineDb(scopeKey);
+        await db.operations.add({
+          id: crypto.randomUUID(),
+          type: 'SEND_REPORT_EMAIL',
+          payload: { reportId, to, cc, subject, message },
+          status: 'PENDING',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          attempts: 0,
+          summary: `Correo a ${to || 'destinatario'} (pendiente de envío)`
+        });
+        setSent('Sin conexión: el envío quedó pendiente y se hará automáticamente cuando vuelva Internet.');
+      });
+      return;
+    }
 
     const fd = new FormData();
     fd.append('to', to);
@@ -104,6 +131,13 @@ export function SendReportEmailModal({ reportId, reportLabel, onClose }: Props) 
                 />
               </div>
 
+              {!isOnline && (
+                <div className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">
+                  <CloudOff className="h-4 w-4 shrink-0" />
+                  Sin conexión: se guardará y se enviará automáticamente al volver Internet.
+                </div>
+              )}
+
               {error && <div className="rounded-md bg-destructive/10 p-2 text-sm text-destructive">{error}</div>}
 
               <div className="flex justify-end gap-2 pt-2">
@@ -111,7 +145,7 @@ export function SendReportEmailModal({ reportId, reportLabel, onClose }: Props) 
                   Cancelar
                 </Button>
                 <Button type="submit" disabled={isPending}>
-                  {isPending ? 'Enviando...' : 'Enviar'}
+                  {isPending ? 'Enviando...' : !isOnline ? 'Guardar sin conexión' : 'Enviar'}
                 </Button>
               </div>
             </form>

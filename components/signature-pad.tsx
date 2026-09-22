@@ -10,6 +10,11 @@ type Props = {
   defaultName?: string;
   defaultRole?: string;
   defaultDate?: string;
+  // Restaura una firma ya dibujada (ej. un borrador offline recuperado tras
+  // recargar la página, ver components/technical-report-form.tsx) - sin
+  // esto, reabrir un informe técnico a medio llenar perdería la firma ya
+  // capturada aunque el resto de los datos del borrador sí sobrevivan.
+  initialDataUrl?: string;
 };
 
 /**
@@ -17,11 +22,11 @@ type Props = {
  * como PNG en base64 dentro de un input oculto `name`, listo para incrustarse
  * en el PDF del informe técnico.
  */
-export function SignaturePad({ label, name, defaultName = "", defaultRole = "", defaultDate = "" }: Props) {
+export function SignaturePad({ label, name, defaultName = "", defaultRole = "", defaultDate = "", initialDataUrl = "" }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [hasSignature, setHasSignature] = useState(false);
-  const [dataUrl, setDataUrl] = useState("");
+  const [hasSignature, setHasSignature] = useState(Boolean(initialDataUrl));
+  const [dataUrl, setDataUrl] = useState(initialDataUrl);
   const [signerName, setSignerName] = useState(defaultName);
   const [signerRole, setSignerRole] = useState(defaultRole);
   const [signerDate, setSignerDate] = useState(defaultDate || new Date().toISOString().slice(0, 10));
@@ -37,6 +42,15 @@ export function SignaturePad({ label, name, defaultName = "", defaultRole = "", 
     ctx.lineWidth = 2;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
+
+    if (initialDataUrl) {
+      const img = new Image();
+      img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      img.src = initialDataUrl;
+    }
+    // Solo al montar: initialDataUrl es la firma restaurada de un borrador,
+    // no algo que deba re-pintar el canvas en cada re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Prefills come from an async lookup (selecting an existing maintenance) that

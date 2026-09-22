@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/browser";
 import { generateTechnicalReport, getMaintenanceTechnicalDetails } from "@/lib/actions/technical-reports";
 import { ENUM_OPTIONS } from "@/lib/enums";
@@ -9,7 +9,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SignaturePad } from "@/components/signature-pad";
-import { Loader, FileText, CheckCircle, AlertCircle, ImageIcon, Plus, Trash2 } from "lucide-react";
+import { Loader, FileText, CheckCircle, AlertCircle, ImageIcon, Plus, Trash2, CloudOff } from "lucide-react";
+import { useConnectivity } from "@/lib/offline/connectivity";
+import { useOffline } from "@/components/offline-provider";
+import { getOfflineDb, type QueueFile } from "@/lib/offline/db";
 
 type Props = {
   companyId: string;
@@ -25,9 +28,13 @@ type MaintenanceOption = {
 type EvidenceType = "BEFORE" | "AFTER" | "EVIDENCE";
 
 type EvidencePhoto = {
+  clientId: string;
   title: string;
   url: string;
   type: EvidenceType;
+  // Solo cuando la foto se guardó sin conexión: identifica el Blob en la
+  // tabla `files` de Dexie (todavía no tiene URL real, se sube al sincronizar).
+  pendingLocal?: boolean;
 };
 
 const EVIDENCE_TYPE_LABELS: Record<EvidenceType, string> = {
@@ -41,6 +48,39 @@ const MAX_EVIDENCE_MB = 8;
 // cada foto es independiente (no forma parejas), el tope se expresa
 // directamente en fotos individuales mantiene el mismo máximo real de 12.
 const MAX_EVIDENCE_ITEMS = 12;
+
+const TEXT_FIELD_NAMES = [
+  "reportDate",
+  "clientName",
+  "clientContact",
+  "projectName",
+  "projectLocation",
+  "equipment",
+  "assetCode",
+  "assetBrandModel",
+  "equipmentStatus",
+  "responsibleName",
+  "technicianName",
+  "activityType",
+  "problemDescription",
+  "diagnosis",
+  "workActivity",
+  "procedure",
+  "materialsUsed",
+  "sparePartsUsed",
+  "observations",
+] as const;
+
+const SIGNATURE_FIELD_NAMES = [
+  "technicalSignatureImage",
+  "technicalSignatureName",
+  "technicalSignatureRole",
+  "technicalSignatureDate",
+  "clientSignatureImage",
+  "clientSignatureName",
+  "clientSignatureRole",
+  "clientSignatureDate",
+] as const;
 
 /**
  * Evidence photos upload straight from the browser to Storage (see the
@@ -79,17 +119,31 @@ function EvidencePicker({
   label,
   companyId,
   initialUrl,
+  offline,
   onUploaded,
+  onLocalFile,
 }: {
   label: string;
   companyId: string;
   initialUrl: string;
+  offline: boolean;
   onUploaded: (url: string) => void;
+  onLocalFile: (file: File) => void;
 }) {
   const [preview, setPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const supabase = createClient();
+
+  const validate = (file: File): string | null => {
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      return "Solo se aceptan JPG, PNG o WebP.";
+    }
+    if (file.size > MAX_EVIDENCE_MB * 1024 * 1024) {
+      return `La imagen supera el tamaño máximo de ${MAX_EVIDENCE_MB} MB.`;
+    }
+    return null;
+  };
 
   // Evidence photos used to travel as raw Files inside the Server Action's
   // FormData, which broke in two independent ways in production: Vercel
@@ -98,23 +152,33 @@ function EvidencePicker({
   // filesystem (read-only on Vercel). Uploading straight from the browser to
   // the private "reports" bucket - the same pattern already used for
   // documents - avoids both: only a short signed URL string ever reaches the
-  // Server Action.
+  // Server Action. Offline, there is no server to reach at all yet - the
+  // (already compressed) Blob is handed back to the parent, which stores it
+  // in IndexedDB and uploads it later at sync time (lib/offline/sync.ts).
   const handleSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     setUploadError(null);
-    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-      setUploadError("Solo se aceptan JPG, PNG o WebP.");
-      event.target.value = "";
-      return;
-    }
-    if (file.size > MAX_EVIDENCE_MB * 1024 * 1024) {
-      setUploadError(`La imagen supera el tamaño máximo de ${MAX_EVIDENCE_MB} MB.`);
+    const validationError = validate(file);
+    if (validationError) {
+      setUploadError(validationError);
       event.target.value = "";
       return;
     }
 
     setPreview(URL.createObjectURL(file));
+
+    if (offline) {
+      setUploading(true);
+      try {
+        const compressed = await compressImageForUpload(file);
+        onLocalFile(compressed);
+      } finally {
+        setUploading(false);
+      }
+      return;
+    }
+
     setUploading(true);
     try {
       const uploadFile = await compressImageForUpload(file);
@@ -152,7 +216,7 @@ function EvidencePicker({
           </div>
         )}
         <label className="mt-2 block cursor-pointer text-center text-xs text-primary hover:underline">
-          {uploading ? "Subiendo..." : displayUrl ? "Cambiar imagen" : "Subir imagen"}
+          {uploading ? (offline ? "Guardando..." : "Subiendo...") : displayUrl ? "Cambiar imagen" : "Subir imagen"}
           <input
             type="file"
             accept="image/jpeg,image/png,image/webp"
@@ -161,11 +225,38 @@ function EvidencePicker({
             onChange={handleSelect}
           />
         </label>
+        {offline && displayUrl ? (
+          <p className="mt-1 flex items-center gap-1 text-xs text-amber-700">
+            <CloudOff className="h-3 w-3" /> Guardada en este dispositivo - se subirá al volver la conexión.
+          </p>
+        ) : null}
         {uploadError ? <p className="mt-1 text-xs text-destructive">{uploadError}</p> : null}
       </div>
     </div>
   );
 }
+
+const emptyFormState: Record<string, string> = {
+  reportDate: new Date().toISOString().slice(0, 10),
+  clientName: "",
+  clientContact: "",
+  projectName: "",
+  projectLocation: "",
+  equipment: "",
+  assetCode: "",
+  assetBrandModel: "",
+  equipmentStatus: "",
+  responsibleName: "",
+  technicianName: "",
+  activityType: "",
+  problemDescription: "",
+  diagnosis: "",
+  workActivity: "",
+  procedure: "",
+  materialsUsed: "",
+  sparePartsUsed: "",
+  observations: "",
+};
 
 export function TechnicalReportForm({ companyId }: Props) {
   const [maintenances, setMaintenances] = useState<MaintenanceOption[]>([]);
@@ -173,45 +264,214 @@ export function TechnicalReportForm({ companyId }: Props) {
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [formState, setFormState] = useState<Record<string, string>>({
-    reportDate: new Date().toISOString().slice(0, 10),
-    clientName: "",
-    clientContact: "",
-    projectName: "",
-    projectLocation: "",
-    equipment: "",
-    assetCode: "",
-    assetBrandModel: "",
-    equipmentStatus: "",
-    responsibleName: "",
-    technicianName: "",
-    activityType: "",
-    problemDescription: "",
-    diagnosis: "",
-    workActivity: "",
-    procedure: "",
-    materialsUsed: "",
-    sparePartsUsed: "",
-    observations: "",
-  });
+  const [formState, setFormState] = useState<Record<string, string>>(emptyFormState);
   const [evidencePhotos, setEvidencePhotos] = useState<EvidencePhoto[]>([]);
+  const [draftLoaded, setDraftLoaded] = useState(false);
+  const [draftRestoredNotice, setDraftRestoredNotice] = useState(false);
+  const [signatureRestore, setSignatureRestore] = useState<Record<string, string>>({});
+  // SignaturePad guarda el trazo dibujado solo en su propio estado interno,
+  // sin ninguna forma externa de "limpiarlo" - cambiar su `key` fuerza a
+  // React a desmontar y volver a montar el componente desde cero después de
+  // un envío exitoso. Sin esto, la firma ya enviada seguía viva en el
+  // canvas/input oculto y el autoguardado la tomaba como "contenido nuevo",
+  // creando un borrador fantasma con esa firma vieja pero ningún otro dato.
+  const [formResetCounter, setFormResetCounter] = useState(0);
 
+  const formRef = useRef<HTMLFormElement>(null);
+  const draftIdRef = useRef<string>(crypto.randomUUID());
   const supabase = createClient();
+  const { isOnline } = useConnectivity();
+  const { scopeKey } = useOffline();
 
   useEffect(() => {
     const loadMaintenances = async () => {
-      const { data } = await supabase
-        .from("maintenance_records")
-        .select("id, title, description, maintenance_date")
-        .eq("company_id", companyId)
-        .order("maintenance_date", { ascending: false })
-        .limit(50);
+      try {
+        const { data } = await supabase
+          .from("maintenance_records")
+          .select("id, title, description, maintenance_date")
+          .eq("company_id", companyId)
+          .order("maintenance_date", { ascending: false })
+          .limit(50);
 
-      setMaintenances((data || []) as MaintenanceOption[]);
+        if (data) {
+          setMaintenances(data as MaintenanceOption[]);
+          // Se guarda una copia mínima para poder mostrar el mismo selector
+          // sin conexión (ver el catch más abajo) - ver lib/offline/db.ts,
+          // reutiliza la misma cola como almacén de "catálogo" bajo un tipo
+          // que runQueue nunca toca.
+          const db = getOfflineDb(scopeKey);
+          await db.operations.put({
+            id: "__catalog_maintenances__",
+            type: "CRUD",
+            table: "__catalog__",
+            action: undefined,
+            payload: { list: JSON.stringify(data) },
+            status: "SYNCED",
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            attempts: 0,
+            summary: "Catálogo de mantenimientos (offline)",
+          });
+        }
+      } catch {
+        // Sin conexión: se usa la última copia guardada del catálogo, si
+        // existe, en vez de dejar el selector vacío.
+        const db = getOfflineDb(scopeKey);
+        const cached = await db.operations.get("__catalog_maintenances__");
+        if (cached) {
+          try {
+            setMaintenances(JSON.parse(String(cached.payload.list)) as MaintenanceOption[]);
+          } catch {
+            // Copia corrupta o vacía - se ignora, el selector queda vacío.
+          }
+        }
+      }
     };
 
     loadMaintenances();
-  }, [companyId, supabase]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
+  // Al montar, revisa si ya hay un borrador guardado en este dispositivo
+  // (ver el autosave más abajo) y lo restaura antes de mostrar el
+  // formulario - las firmas (SignaturePad) solo leen su valor inicial una
+  // vez al montar, así que el formulario no se muestra hasta que la
+  // restauración (asíncrona, lee IndexedDB) termina.
+  useEffect(() => {
+    (async () => {
+      const db = getOfflineDb(scopeKey);
+      const existingDraft = await db.operations
+        .where("status")
+        .equals("DRAFT")
+        .and((op) => op.type === "CREATE_TECHNICAL_REPORT")
+        .first();
+
+      if (!existingDraft) {
+        setDraftLoaded(true);
+        return;
+      }
+
+      draftIdRef.current = existingDraft.id;
+      const payload = existingDraft.payload as Record<string, string>;
+
+      setFormState((prev) => {
+        const next = { ...prev };
+        for (const key of TEXT_FIELD_NAMES) {
+          if (payload[key] !== undefined) next[key] = payload[key];
+        }
+        return next;
+      });
+      if (payload.__maintenanceId) setSelectedMaintenanceId(payload.__maintenanceId);
+
+      const signatures: Record<string, string> = {};
+      for (const key of SIGNATURE_FIELD_NAMES) {
+        if (payload[key]) signatures[key] = payload[key];
+      }
+      setSignatureRestore(signatures);
+
+      const files = await db.files.where("operationId").equals(existingDraft.id).toArray();
+      const filesByClientId = new Map<string, QueueFile>(files.map((file) => [file.fieldName, file]));
+
+      try {
+        const restoredPhotos = JSON.parse(String(payload.__evidence || "[]")) as Array<{
+          clientId: string;
+          title: string;
+          type: EvidenceType;
+          url: string;
+          pendingLocal?: boolean;
+        }>;
+        setEvidencePhotos(
+          restoredPhotos.map((photo) => {
+            if (photo.pendingLocal) {
+              const file = filesByClientId.get(photo.clientId);
+              return { ...photo, url: file ? URL.createObjectURL(file.blob) : "" };
+            }
+            return photo;
+          })
+        );
+      } catch {
+        // Sin fotos en el borrador o formato corrupto - se restaura vacío en
+        // vez de romper la carga del resto del borrador.
+      }
+
+      setDraftRestoredNotice(true);
+      setDraftLoaded(true);
+    })();
+  }, [scopeKey]);
+
+  // Espejos en ref de todo lo que el autoguardado necesita leer "al vuelo" -
+  // el guardado corre en un setInterval creado UNA sola vez (ver más abajo),
+  // así que si leyera formState/evidencePhotos/selectedMaintenanceId
+  // directamente de los closures de React quedaría con los valores del
+  // momento en que se creó el intervalo, no los más recientes. Esto importa
+  // en particular para las firmas: SignaturePad guarda el trazo dibujado
+  // solo en el DOM (un input oculto), nunca en el estado de React de este
+  // componente - si el autoguardado solo reaccionara a cambios de formState/
+  // evidencePhotos (vía un efecto con esas dependencias), dibujar una firma
+  // DESPUÉS del último cambio a esos campos nunca dispararía un nuevo
+  // guardado y la firma se perdería en un cierre/recarga inesperados.
+  const formStateRef = useRef(formState);
+  formStateRef.current = formState;
+  const evidencePhotosRef = useRef(evidencePhotos);
+  evidencePhotosRef.current = evidencePhotos;
+  const selectedMaintenanceIdRef = useRef(selectedMaintenanceId);
+  selectedMaintenanceIdRef.current = selectedMaintenanceId;
+
+  // Autoguardado: mientras el usuario llena el formulario (antes de tocar
+  // "Generar informe técnico"), el progreso se refleja en Dexie cada pocos
+  // segundos - así una recarga, un cierre accidental o quedarse sin batería
+  // no pierden lo ya diligenciado, las fotos ya tomadas ni las firmas ya
+  // capturadas. No se crea el borrador hasta que haya algo real que guardar
+  // (evita filas vacías por solo abrir la página). Corre con un intervalo
+  // fijo, no atado a "qué cambió", precisamente para no depender de que el
+  // usuario también haya tocado un campo de texto justo después de firmar.
+  useEffect(() => {
+    if (!draftLoaded) return;
+
+    const saveDraft = async () => {
+      const formState = formStateRef.current;
+      const evidencePhotos = evidencePhotosRef.current;
+      const selectedMaintenanceId = selectedMaintenanceIdRef.current;
+
+      const form = formRef.current;
+      const liveSignatures: Record<string, string> = {};
+      if (form) {
+        const liveFormData = new FormData(form);
+        for (const key of SIGNATURE_FIELD_NAMES) {
+          const value = liveFormData.get(key);
+          if (value) liveSignatures[key] = String(value);
+        }
+      }
+      // Solo la imagen dibujada cuenta como "contenido real" - Nombre/Cargo/
+      // Fecha vienen con valores por defecto (la fecha de hoy) desde el
+      // primer render de SignaturePad, así que por sí solos no deben bastar
+      // para crear un borrador vacío con solo abrir la página.
+      const hasSignatureContent = Boolean(liveSignatures.technicalSignatureImage || liveSignatures.clientSignatureImage);
+      const hasContent = formState.clientName || formState.problemDescription || evidencePhotos.length > 0;
+      if (!hasContent && !hasSignatureContent) return;
+
+      const db = getOfflineDb(scopeKey);
+      await db.operations.put({
+        id: draftIdRef.current,
+        type: "CREATE_TECHNICAL_REPORT",
+        payload: {
+          ...formState,
+          ...liveSignatures,
+          __maintenanceId: selectedMaintenanceId,
+          __companyId: companyId,
+          __evidence: JSON.stringify(evidencePhotos.map(({ clientId, title, type, url, pendingLocal }) => ({ clientId, title, type, url: pendingLocal ? "" : url, pendingLocal }))),
+        },
+        status: "DRAFT",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        attempts: 0,
+        summary: formState.clientName ? `Informe técnico - ${formState.clientName}` : "Informe técnico (borrador)",
+      });
+    };
+
+    const interval = setInterval(() => void saveDraft(), 2000);
+    return () => clearInterval(interval);
+  }, [draftLoaded, scopeKey, companyId]);
 
   const handleMaintenanceChange = async (maintenanceId: string) => {
     setSelectedMaintenanceId(maintenanceId);
@@ -247,10 +507,10 @@ export function TechnicalReportForm({ companyId }: Props) {
           const manual = prev.filter((p) => p.title !== autoTitle);
           const auto: EvidencePhoto[] = [];
           if (result.maintenance.evidenceBeforeUrl) {
-            auto.push({ title: autoTitle, url: result.maintenance.evidenceBeforeUrl, type: "BEFORE" });
+            auto.push({ clientId: crypto.randomUUID(), title: autoTitle, url: result.maintenance.evidenceBeforeUrl, type: "BEFORE" });
           }
           if (result.maintenance.evidenceAfterUrl) {
-            auto.push({ title: autoTitle, url: result.maintenance.evidenceAfterUrl, type: "AFTER" });
+            auto.push({ clientId: crypto.randomUUID(), title: autoTitle, url: result.maintenance.evidenceAfterUrl, type: "AFTER" });
           }
           return [...auto, ...manual].slice(0, MAX_EVIDENCE_ITEMS);
         });
@@ -261,15 +521,46 @@ export function TechnicalReportForm({ companyId }: Props) {
   const addEvidencePhoto = () => {
     // El tipo por defecto es "Evidencia": es el caso más genérico y no debe
     // obligar a la persona a pensar en Antes/Después antes de subir la foto.
-    setEvidencePhotos((prev) => (prev.length >= MAX_EVIDENCE_ITEMS ? prev : [...prev, { title: "", url: "", type: "EVIDENCE" }]));
+    setEvidencePhotos((prev) =>
+      prev.length >= MAX_EVIDENCE_ITEMS ? prev : [...prev, { clientId: crypto.randomUUID(), title: "", url: "", type: "EVIDENCE" }]
+    );
   };
 
-  const removeEvidencePhoto = (index: number) => {
+  const removeEvidencePhoto = async (index: number) => {
+    const photo = evidencePhotos[index];
+    if (photo?.pendingLocal) {
+      const db = getOfflineDb(scopeKey);
+      await db.files.where("fieldName").equals(photo.clientId).delete();
+    }
     setEvidencePhotos((prev) => prev.filter((_, i) => i !== index));
   };
 
   const updateEvidencePhoto = (index: number, patch: Partial<EvidencePhoto>) => {
     setEvidencePhotos((prev) => prev.map((photo, i) => (i === index ? { ...photo, ...patch } : photo)));
+  };
+
+  const handleLocalFile = async (clientId: string, file: File) => {
+    const db = getOfflineDb(scopeKey);
+    // fieldName guarda temporalmente el clientId de la foto (estable mientras
+    // se edita el formulario) - se renombra al índice final evidenceUrl_<n>
+    // recién al confirmar "Generar informe técnico" offline, ver onSubmit.
+    await db.files.put({
+      id: clientId,
+      operationId: draftIdRef.current,
+      fieldName: clientId,
+      blob: file,
+      mimeType: file.type,
+      fileName: file.name,
+      createdAt: Date.now(),
+    });
+    const objectUrl = URL.createObjectURL(file);
+    setEvidencePhotos((prev) => prev.map((photo) => (photo.clientId === clientId ? { ...photo, pendingLocal: true, url: objectUrl } : photo)));
+  };
+
+  const clearDraft = async () => {
+    const db = getOfflineDb(scopeKey);
+    await db.operations.delete(draftIdRef.current);
+    await db.files.where("operationId").equals(draftIdRef.current).delete();
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -283,21 +574,93 @@ export function TechnicalReportForm({ companyId }: Props) {
       if (value) formData.set(key, value);
     });
     if (selectedMaintenanceId) formData.set("maintenanceId", selectedMaintenanceId);
-    // Solo las fotos que realmente tienen una imagen subida viajan al
-    // servidor - una fila agregada y luego dejada vacía (o cuya subida
-    // falló) no debe generar un item de evidencia sin imagen.
-    const photosToSubmit = evidencePhotos.filter((photo) => photo.url);
+    // Solo las fotos que realmente tienen una imagen (subida o guardada
+    // localmente) viajan - una fila agregada y luego dejada vacía no debe
+    // generar un item de evidencia sin imagen.
+    const photosToSubmit = evidencePhotos.filter((photo) => photo.url || photo.pendingLocal);
     formData.set("evidenceCount", String(photosToSubmit.length));
     photosToSubmit.forEach((photo, index) => {
       formData.set(`evidenceTitle_${index}`, photo.title);
-      formData.set(`evidenceUrl_${index}`, photo.url);
       formData.set(`evidenceType_${index}`, photo.type);
+      if (!photo.pendingLocal) formData.set(`evidenceUrl_${index}`, photo.url);
     });
+
+    if (!isOnline) {
+      try {
+        const db = getOfflineDb(scopeKey);
+        // Renombra cada Blob pendiente a su índice final evidenceUrl_<n> -
+        // ver lib/offline/sync.ts, que sube cada archivo de la operación y
+        // pone el resultado en el campo del payload con ese mismo nombre.
+        for (let index = 0; index < photosToSubmit.length; index += 1) {
+          const photo = photosToSubmit[index];
+          if (photo.pendingLocal) {
+            await db.files.where("fieldName").equals(photo.clientId).modify({ fieldName: `evidenceUrl_${index}` });
+          }
+        }
+        // Cualquier Blob que haya quedado de una foto ELIMINADA antes de
+        // enviar (nunca llegó a formar parte de photosToSubmit) se limpia -
+        // si no, quedaría huérfano en Dexie sin ninguna operación PENDING que
+        // lo reclame.
+        const remainingClientIds = new Set(photosToSubmit.filter((p) => p.pendingLocal).map((p) => p.clientId));
+        const allFiles = await db.files.where("operationId").equals(draftIdRef.current).toArray();
+        for (const file of allFiles) {
+          if (!file.fieldName.startsWith("evidenceUrl_") && !remainingClientIds.has(file.fieldName)) {
+            await db.files.delete(file.id);
+          }
+        }
+
+        const payload: Record<string, unknown> = { __companyId: companyId };
+        for (const [key, value] of formData.entries()) {
+          if (value instanceof File) continue;
+          payload[key] = value;
+        }
+
+        await db.operations.put({
+          id: draftIdRef.current,
+          type: "CREATE_TECHNICAL_REPORT",
+          payload,
+          status: "PENDING",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          attempts: 0,
+          summary: `Informe técnico - ${formState.clientName || "sin cliente"}`,
+        });
+
+        const pendingPhotoCount = photosToSubmit.filter((p) => p.pendingLocal).length;
+        setMessage(
+          `Guardado sin conexión. ${pendingPhotoCount > 0 ? `${pendingPhotoCount} foto(s) y ` : ""}el informe se generarán automáticamente cuando vuelva Internet.`
+        );
+        draftIdRef.current = crypto.randomUUID();
+        setFormState(emptyFormState);
+        setEvidencePhotos([]);
+        setSelectedMaintenanceId("");
+        setSignatureRestore({});
+        setFormResetCounter((n) => n + 1);
+        formRef.current?.reset();
+      } catch {
+        setError("No se pudo guardar el informe sin conexión en este dispositivo.");
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
 
     try {
       const result = await generateTechnicalReport(formData);
       if (result.success) {
         setMessage(result.message || "Informe técnico generado correctamente.");
+        await clearDraft();
+        // Sin este reset, el autoguardado (corre cada 2s sin importar qué
+        // disparó el render) vería el formulario todavía lleno con lo que se
+        // acaba de generar y resucitaría un borrador fantasma con ese mismo
+        // contenido bajo el id nuevo, segundos después de un envío exitoso.
+        draftIdRef.current = crypto.randomUUID();
+        setFormState(emptyFormState);
+        setEvidencePhotos([]);
+        setSelectedMaintenanceId("");
+        setSignatureRestore({});
+        setFormResetCounter((n) => n + 1);
+        formRef.current?.reset();
       } else {
         setError(result.error || "No fue posible generar el informe técnico.");
       }
@@ -311,6 +674,14 @@ export function TechnicalReportForm({ companyId }: Props) {
     }
   };
 
+  if (!draftLoaded) {
+    return (
+      <div className="flex items-center justify-center rounded-lg border p-12 text-sm text-muted-foreground">
+        <Loader className="mr-2 h-4 w-4 animate-spin" /> Cargando...
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
       <Card>
@@ -319,7 +690,22 @@ export function TechnicalReportForm({ companyId }: Props) {
           <CardDescription>Completa el formulario y genera un PDF listo para entregar al cliente.</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-5">
+          {draftRestoredNotice ? (
+            <div className="mb-4 flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-800">
+              <CheckCircle className="h-4 w-4" />
+              <span>Se restauró un borrador guardado en este dispositivo.</span>
+            </div>
+          ) : null}
+          {!isOnline ? (
+            <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              <CloudOff className="h-4 w-4" />
+              <span>
+                Sin conexión: puedes completar todo el informe (datos, fotos y firmas). Se guardará en este dispositivo
+                y el PDF se generará automáticamente al volver Internet.
+              </span>
+            </div>
+          ) : null}
+          <form ref={formRef} onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-2">
               <Label>Mantenimiento asociado</Label>
               <select
@@ -490,7 +876,7 @@ export function TechnicalReportForm({ companyId }: Props) {
                 </p>
               ) : null}
               {evidencePhotos.map((photo, index) => (
-                <div key={index} className="space-y-2 rounded-md border bg-background p-3">
+                <div key={photo.clientId} className="space-y-2 rounded-md border bg-background p-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <Input
                       className="flex-1"
@@ -515,7 +901,7 @@ export function TechnicalReportForm({ companyId }: Props) {
                         ))}
                       </select>
                     </div>
-                    <Button type="button" size="sm" variant="ghost" onClick={() => removeEvidencePhoto(index)}>
+                    <Button type="button" size="sm" variant="ghost" onClick={() => void removeEvidencePhoto(index)}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
@@ -523,15 +909,33 @@ export function TechnicalReportForm({ companyId }: Props) {
                     label={`Foto (${EVIDENCE_TYPE_LABELS[photo.type]})`}
                     companyId={companyId}
                     initialUrl={photo.url}
-                    onUploaded={(url) => updateEvidencePhoto(index, { url })}
+                    offline={!isOnline}
+                    onUploaded={(url) => updateEvidencePhoto(index, { url, pendingLocal: false })}
+                    onLocalFile={(file) => void handleLocalFile(photo.clientId, file)}
                   />
                 </div>
               ))}
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
-              <SignaturePad label="Firma del técnico" name="technicalSignature" defaultName={formState.technicianName} />
-              <SignaturePad label="Firma del cliente" name="clientSignature" defaultName={formState.clientContact} />
+              <SignaturePad
+                key={`technical-${formResetCounter}`}
+                label="Firma del técnico"
+                name="technicalSignature"
+                defaultName={signatureRestore.technicalSignatureName || formState.technicianName}
+                defaultRole={signatureRestore.technicalSignatureRole}
+                defaultDate={signatureRestore.technicalSignatureDate}
+                initialDataUrl={signatureRestore.technicalSignatureImage}
+              />
+              <SignaturePad
+                key={`client-${formResetCounter}`}
+                label="Firma del cliente"
+                name="clientSignature"
+                defaultName={signatureRestore.clientSignatureName || formState.clientContact}
+                defaultRole={signatureRestore.clientSignatureRole}
+                defaultDate={signatureRestore.clientSignatureDate}
+                initialDataUrl={signatureRestore.clientSignatureImage}
+              />
             </div>
 
             {error ? (
@@ -549,7 +953,19 @@ export function TechnicalReportForm({ companyId }: Props) {
             ) : null}
 
             <Button type="submit" disabled={isLoading} className="w-full">
-              {isLoading ? <><Loader className="mr-2 h-4 w-4 animate-spin" /> Generando...</> : <><FileText className="mr-2 h-4 w-4" /> Generar informe técnico</>}
+              {isLoading ? (
+                <>
+                  <Loader className="mr-2 h-4 w-4 animate-spin" /> Guardando...
+                </>
+              ) : !isOnline ? (
+                <>
+                  <CloudOff className="mr-2 h-4 w-4" /> Guardar sin conexión
+                </>
+              ) : (
+                <>
+                  <FileText className="mr-2 h-4 w-4" /> Generar informe técnico
+                </>
+              )}
             </Button>
           </form>
         </CardContent>
@@ -565,6 +981,7 @@ export function TechnicalReportForm({ companyId }: Props) {
           <p>• Al elegir un mantenimiento, el sistema autocompleta proyecto, equipo, responsable y observaciones.</p>
           <p>• Las firmas se capturan a mano (mouse o dedo) y se incrustan como imagen en el PDF.</p>
           <p>• El PDF se guarda para descarga y se registra en el historial de informes.</p>
+          <p>• Sin conexión, puedes completar todo (datos, fotos, firmas) y quedará &quot;Pendiente de generación&quot; hasta que vuelva Internet.</p>
         </CardContent>
       </Card>
     </div>

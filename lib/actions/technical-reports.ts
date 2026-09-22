@@ -107,6 +107,34 @@ export async function generateTechnicalReport(formData: FormData) {
     const supabase = await createClient();
     reportSupabase = supabase;
 
+    // Modo offline: el dispositivo genera este id una sola vez al guardar el
+    // borrador y lo reenvía en cada reintento de sincronización. Si ya existe
+    // un informe con este mismo (company_id, client_op_id) - ej. la conexión
+    // se cortó justo después de que el intento anterior sí terminara de
+    // generarse - se devuelve ese informe ya generado en vez de volver a
+    // correr todo el pipeline (PDF + Storage) por segunda vez, que además de
+    // costoso duplicaría el informe entregado al cliente.
+    const clientOpIdRaw = formData.get('client_op_id');
+    const clientOpId = clientOpIdRaw ? String(clientOpIdRaw) : undefined;
+    if (clientOpId) {
+      const { data: existing } = await supabase
+        .from('generated_reports')
+        .select('id, file_url, file_path')
+        .eq('company_id', tenant.companyId)
+        .eq('client_op_id', clientOpId)
+        .maybeSingle();
+
+      if (existing) {
+        return {
+          success: true,
+          reportId: existing.id,
+          downloadUrl: existing.file_url || existing.file_path || '',
+          fileName: '',
+          message: 'Informe técnico generado correctamente.',
+        };
+      }
+    }
+
     const getText = (key: string, maxLength = 2000) => sanitizeText(formData.get(key) as string, maxLength);
 
     const activityTypeRaw = getText('activityType', 60);
@@ -303,6 +331,7 @@ export async function generateTechnicalReport(formData: FormData) {
 
     const generatedReportsInsertPayload = {
       company_id: tenant.companyId,
+      client_op_id: clientOpId || null,
       report_type: 'TECHNICAL_REPORT',
       report_entity: 'TECHNICAL',
       report_format: 'PDF',
@@ -329,6 +358,31 @@ export async function generateTechnicalReport(formData: FormData) {
       .insert(generatedReportsInsertPayload as Record<string, unknown>)
       .select()
       .single();
+
+    if (reportInsertError?.code === '23505' && clientOpId && reportInsertError.message.includes('client_op_key')) {
+      // Carrera real entre dos intentos de sincronización concurrentes (ej.
+      // dos pestañas, o un reintento que arrancó justo antes de que el
+      // primero terminara) - el chequeo previo no la vio porque el otro
+      // intento todavía no había insertado. El PDF ya generado en este
+      // intento se descarta (nunca llegó a insertarse), se devuelve el que sí
+      // ganó la carrera.
+      const { data: existing } = await supabase
+        .from('generated_reports')
+        .select('id, file_url, file_path')
+        .eq('company_id', tenant.companyId)
+        .eq('client_op_id', clientOpId)
+        .maybeSingle();
+
+      if (existing) {
+        return {
+          success: true,
+          reportId: existing.id,
+          downloadUrl: existing.file_url || existing.file_path || '',
+          fileName: '',
+          message: 'Informe técnico generado correctamente.',
+        };
+      }
+    }
 
     if (reportInsertError || !report) {
       console.error('GENERATED_REPORTS_INSERT_ERROR', {

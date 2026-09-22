@@ -230,31 +230,40 @@ Debajo, tres gráficos (estado de equipos, mantenimientos por mes, novedades por
 
 ## 12. Modo sin conexión (offline)
 
-**Para qué sirve**: permitir que el personal de campo (obra, taller, zona sin señal) siga trabajando cuando no hay Internet, y que lo registrado se sincronice solo apenas vuelva la conexión.
+**Para qué sirve**: permitir que el personal de campo (obra, taller, zona sin señal) siga trabajando ampliamente cuando no hay Internet, y que todo lo registrado se sincronice solo, en el orden correcto y sin duplicados, apenas vuelva la conexión.
 
 **No prometemos "todo funciona sin Internet"**. Esto es exactamente lo que hoy funciona y lo que no:
 
 **Disponible sin conexión:**
-- Ver los **Equipos**, **Mantenimientos**, **Novedades**, **Panel general** y demás páginas que haya visitado antes mientras tenía señal (se muestra la última versión guardada en el dispositivo).
-- Registrar un **nuevo mantenimiento** o una **nueva novedad**: el formulario se completa y se guarda igual que siempre.
+- Ver los **Equipos**, **Mantenimientos**, **Novedades**, **Obras**, **Documentos**, **Panel general** y demás páginas que haya visitado antes mientras tenía señal (se muestra la última versión guardada en el dispositivo).
+- **Crear** un nuevo Equipo, Mantenimiento, Novedad, Obra o Usuario (registro interno).
+- **Editar** un Equipo, Mantenimiento, Novedad, Obra, Usuario o la metadata de un Documento ya existente.
+- **Eliminar** un Equipo, Mantenimiento, Novedad u Obra (solo Administrador, igual que en línea).
+- **Cargar un Documento nuevo**: el archivo se guarda en el dispositivo y se sube automáticamente al volver la señal.
+- **Diligenciar un Informe técnico completo**: todos los campos, hasta 12 fotos de evidencia (Antes/Después/Evidencia) y las firmas de técnico y cliente dibujadas en pantalla. El PDF se genera automáticamente en el servidor al volver Internet (ver más abajo por qué no se genera en el propio dispositivo).
+- **Solicitar un Informe** (Equipos, Mantenimientos, Novedades, Obras, Documentos) — la solicitud queda guardada y el PDF/Excel se genera en el servidor al volver la señal.
+- **Preparar el envío de un Informe por correo** — destinatario, copia, asunto y mensaje quedan guardados; el correo se envía de verdad al volver la señal, sin que tenga que volver a escribirlo.
+- Encadenar varios registros nuevos entre sí sin conexión (ej. crear una Obra y, en la misma visita sin señal, un Mantenimiento de esa misma Obra) — al sincronizar, se respeta el orden en que los creó.
 
-**Requiere conexión (no disponible sin Internet):**
-- Crear o editar un **Equipo**.
-- Cargar **Documentos**, adjuntar archivos a un **Equipo** (`asset_documents`).
-- Crear o generar un **Informe** o un **Informe técnico** (incluidas las fotos de evidencia y las firmas) — esto se documenta como limitación actual: no fuerce la generación offline; espere a tener señal.
-- Cualquier módulo no mencionado arriba (Documentos, Obras, Usuarios, Configuración, etc.).
+**Requiere conexión (no puede prepararse offline):**
+- El **PDF/Excel** de un Informe o Informe técnico no se genera en el dispositivo — el motor que arma esos archivos necesita el servidor. Sin conexión puede diligenciar todo, pero el documento final aparece cuando vuelve la señal.
+- **Enviar** de verdad un correo (requiere un servidor de correo alcanzable) — puede prepararlo sin conexión, pero el envío ocurre al volver la señal.
+- Conectar/reconectar **Google Calendar**, cambiar **Webhooks**, **SMTP** u otra integración externa.
+- Ver **Registros recientes** de una página que nunca había visitado antes de quedarse sin señal.
 
 **Cómo saber si hay conexión**: un indicador pequeño y siempre visible, junto al nombre de su empresa, muestra el estado real (no solo si el teléfono "cree" tener señal):
 - 🟢 **En línea** — todo se guarda directo en el servidor, como siempre.
-- 🟠 **Sin conexión** — los cambios que haga ahora (mantenimientos, novedades) se guardan **en este dispositivo** y el botón de guardar dice "Guardar sin conexión".
+- 🟠 **Sin conexión** — los cambios que haga ahora se guardan **en este dispositivo** y el botón de guardar dice "Guardar sin conexión".
 - 🔵 **Sincronizando** — se está enviando al servidor lo que quedó pendiente.
 - El indicador puede mostrar también cuántos registros están **pendientes de sincronización**, y ofrece un botón para **reintentar** si algún envío falló.
 
-**Qué pasa cuando guarda sin conexión**: el registro queda marcado como **"Pendiente de sincronización"** y aparece en una lista bajo el formulario, en este mismo dispositivo. No se pierde si cierra la pestaña o la aplicación — al volver a abrirla, sigue ahí. Apenas la aplicación detecta conexión real (no basta con que el teléfono "diga" que hay wifi), sincroniza automáticamente, sin que tenga que hacer nada. Si por alguna razón la sincronización falla (ej. la señal se corta a mitad de camino), el registro pasa a **"Falló - reintentar"** y puede tocarlo para intentarlo de nuevo; nunca se pierde y nunca se duplica, aunque guarde dos veces o se reintente varias veces.
+**Qué pasa cuando guarda sin conexión**: el registro queda marcado como **"Pendiente de sincronización"** y aparece en una lista bajo el formulario, en este mismo dispositivo. No se pierde si cierra la pestaña o la aplicación — al volver a abrirla, sigue ahí, con sus fotos y firmas incluidas. Apenas la aplicación detecta conexión real (no basta con que el teléfono "diga" que hay wifi), sincroniza automáticamente, sin que tenga que hacer nada. Si por alguna razón la sincronización falla (ej. la señal se corta a mitad de camino), el registro pasa a **"Falló - reintentar"** y puede tocarlo para intentarlo de nuevo, o descartarlo si ya no aplica; nunca se pierde y nunca se duplica, aunque guarde dos veces o se reintente varias veces.
 
-**Importante para dispositivos compartidos**: lo guardado sin conexión queda asociado a la empresa y el usuario que lo creó. Si otra persona inicia sesión con otra cuenta en el mismo teléfono/computador, no verá ni podrá sincronizar lo que usted dejó pendiente.
+**Informes técnicos sin conexión, en detalle**: puede seleccionar un mantenimiento ya sincronizado (el listado se guarda para consultarlo sin señal), diligenciar cliente, diagnóstico, actividades y demás campos, agregar fotos (se guardan en el dispositivo, con vista previa, y puede cambiarles el tipo o borrarlas antes de enviar) y dibujar ambas firmas. Todo el progreso se guarda automáticamente cada pocos segundos mientras completa el formulario — si cierra la aplicación a la mitad y vuelve más tarde, encuentra su borrador tal como lo dejó, firmas incluidas. Al presionar "Guardar sin conexión" queda pendiente; al volver la señal, las fotos se suben, el PDF se genera con los datos, firmas y evidencia correctos, y el informe aparece en el historial exactamente igual que uno generado en línea.
 
-**Limitación actual conocida**: los Informes técnicos (con fotos y firmas) todavía no se pueden crear sin conexión; quedan para una siguiente fase de esta función. Si necesita levantar un informe técnico en campo sin señal, tome los datos y complételo en la plataforma apenas recupere conexión.
+**Importante para dispositivos compartidos**: lo guardado sin conexión queda asociado a la empresa y el usuario que lo creó (cada combinación usuario+empresa usa un almacenamiento separado en el dispositivo). Si otra persona inicia sesión con otra cuenta en el mismo teléfono/computador, no verá ni podrá sincronizar lo que usted dejó pendiente.
+
+**Para preparar el dispositivo antes de ir a una zona sin señal**: visite una vez, con conexión, cada página que vaya a necesitar (Equipos, Mantenimientos, Novedades, Obras, Documentos, Informes técnicos) — y recárguela una segunda vez si es la primera vez que abre la aplicación en ese dispositivo. Así queda disponible sin conexión.
 
 ## 13. Configuración
 
@@ -325,6 +334,8 @@ Opciones disponibles para Progrúas:
 - **El indicador dice "Sin conexión" pero tengo wifi**: la wifi puede estar conectada sin salida real a Internet (portal cautivo, red de obra restringida); la plataforma verifica conexión real, no solo si el dispositivo tiene una red activa. Espere unos segundos; el chequeo se repite automáticamente.
 - **Un registro quedó "Pendiente de sincronización" mucho tiempo**: revise que realmente haya señal; toque el indicador para reintentar manualmente. El registro no se pierde mientras no lo borre del dispositivo.
 - **Un registro pasó a "Falló - reintentar"**: toque para reintentar; si persiste, verifique la conexión y que el equipo relacionado siga existiendo.
+- **Mi informe técnico sin conexión no muestra el PDF todavía**: es normal - el PDF se genera en el servidor al volver la señal, no en el dispositivo. Revise el historial de "Informes" un momento después de recuperar Internet.
+- **No encuentro la Obra/Equipo que acabo de crear sin conexión en la lista desplegable de otro formulario**: sí debería aparecer, marcado "(pendiente de sincronizar)" - si no aparece, recargue la página una vez (sin perder lo ya diligenciado en el formulario que tenía abierto no está garantizado si no lo había guardado todavía).
 
 ## 16. Buenas prácticas
 

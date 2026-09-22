@@ -46,21 +46,37 @@ const FK_TABLE_BY_FIELD: Record<string, string> = {
 };
 
 const UNIQUE_VIOLATION_CODE = "23505";
+const FOREIGN_KEY_VIOLATION_CODE = "23503";
 const uniqueConstraintMessages: Record<string, string> = {
   assets_company_id_code_key: "Ya existe un activo con ese código en tu empresa.",
   projects_company_id_code_key: "Ya existe una obra con ese código en tu empresa."
 };
 
-// Ver 043_offline_sync_idempotency.sql: la cola offline (lib/offline/*) envía
-// un client_op_id generado en el dispositivo. Si la sincronización se
-// reintenta (ej. la respuesta se perdió por una caída de red justo después
-// de que el insert original tuvo éxito), este mismo id vuelve a viajar - la
-// restricción única por (company_id, client_op_id) hace que Postgres
-// rechace el segundo insert con 23505 en vez de duplicar la fila, y estas
-// tablas son las únicas donde ese 23505 específico significa "ya estaba
-// sincronizado" (éxito), no un error real.
-const IDEMPOTENT_TABLES = new Set(["maintenance_records", "incidents", "assets"]);
+// Ver 043_offline_sync_idempotency.sql y 044_offline_sync_expand_idempotency.sql:
+// la cola offline (lib/offline/*) envía un client_op_id generado en el
+// dispositivo. Si la sincronización se reintenta (ej. la respuesta se perdió
+// por una caída de red justo después de que el insert original tuvo éxito),
+// este mismo id vuelve a viajar - la restricción única por
+// (company_id, client_op_id) hace que Postgres rechace el segundo insert con
+// 23505 en vez de duplicar la fila, y estas tablas son las únicas donde ese
+// 23505 específico significa "ya estaba sincronizado" (éxito), no un error
+// real.
+const IDEMPOTENT_TABLES = new Set(["maintenance_records", "incidents", "assets", "projects", "users", "asset_documents"]);
 const clientOpIdSchema = z.string().uuid().optional();
+
+// Tablas donde un registro creado offline puede necesitar ser referenciado
+// (como asset_id/project_id/etc) por OTRO registro creado offline en la misma
+// sesión, antes de que ninguno de los dos haya llegado a Supabase todavía -
+// ej. crear una Obra sin conexión y, acto seguido, un Mantenimiento de esa
+// misma Obra, también sin conexión. En vez de un mapeo local-id -> server-id
+// aparte, el dispositivo elige el UUID real de la fila desde el momento de la
+// creación (client-generated primary key) - así el segundo registro puede
+// usar ese mismo id como referencia de inmediato, sin esperar a que el
+// primero sincronice, y la cola solo necesita respetar el orden en que se
+// crearon (FIFO, ver lib/offline/sync.ts) para que la fila padre exista en
+// Supabase antes de que se intente insertar la fila que la referencia.
+const CLIENT_ID_TABLES = new Set(["assets", "projects", "maintenance_records", "incidents", "users"]);
+const clientIdSchema = z.string().uuid().optional();
 
 function failure(error: string): TenantRecordActionState {
   return { success: false, error };
@@ -320,17 +336,34 @@ export async function createTenantRecord(
       if (clientOpId) payload.client_op_id = clientOpId;
     }
 
+    let clientId: string | undefined;
+    if (CLIENT_ID_TABLES.has(parsed.table)) {
+      const rawClientId = formData.get("id");
+      const clientIdResult = clientIdSchema.safeParse(rawClientId ? String(rawClientId) : undefined);
+      if (!clientIdResult.success) {
+        return failure("Identificador de registro inválido.");
+      }
+      clientId = clientIdResult.data;
+    }
+
     const { error } = await supabase.from(parsed.table).insert({
+      ...(clientId ? { id: clientId } : {}),
       ...payload,
       company_id: tenant.companyId,
       created_by: tenant.userId
     });
 
     if (error) {
+      // Un reintento con el mismo client_op_id puede chocar contra CUALQUIERA
+      // de las dos restricciones únicas que lo involucran - el índice
+      // client_op_key, o (si además viajó un id elegido por el dispositivo,
+      // ver CLIENT_ID_TABLES) la propia primary key de la tabla, según cuál
+      // evalúe Postgres primero. Ambos casos significan lo mismo: esta fila
+      // ya se sincronizó en un intento anterior.
       const isIdempotentReplay =
         error.code === UNIQUE_VIOLATION_CODE &&
         clientOpId !== undefined &&
-        error.message.includes("client_op_key");
+        (error.message.includes("client_op_key") || (clientId !== undefined && error.message.includes("_pkey")));
 
       if (isIdempotentReplay) {
         // No es un duplicado real: este mismo registro (mismo client_op_id)
@@ -484,13 +517,35 @@ export async function deleteTenantRecord(table: ModuleKey, recordId: string) {
         code: error.code,
         message: error.message
       });
+
+      if (error.code === FOREIGN_KEY_VIOLATION_CODE) {
+        return failure("No se puede eliminar: todavía tiene registros relacionados (mantenimientos, documentos u otros).");
+      }
+
       return failure("No se pudo eliminar el registro.");
     }
 
-    // assertCanDelete ya debería impedir llegar aquí sin permiso, pero si RLS
-    // igual rechaza la fila (0 filas devueltas) no reportamos éxito: evita
-    // repetir el bug de "dice eliminado pero el registro sigue intacto".
     if (!deletedRows || deletedRows.length === 0) {
+      // Puede significar dos cosas muy distintas: (a) el registro nunca
+      // existió o no pertenece a esta empresa - un error real; o (b) ya se
+      // había eliminado en un intento anterior (ej. la cola offline
+      // reintenta un DELETE cuya respuesta se perdió la primera vez, aunque
+      // el borrado sí ocurrió). Sin distinguirlas, un reintento offline vería
+      // "sin permisos" para siempre por un borrado que en realidad ya
+      // funcionó. Se distingue con una consulta de existencia.
+      const { data: stillExists } = await supabase
+        .from(table)
+        .select("id")
+        .eq("id", recordId)
+        .eq("company_id", tenant.companyId)
+        .maybeSingle();
+
+      if (!stillExists) {
+        const moduleDef = getModuleByKey(table);
+        if (moduleDef) revalidatePath(moduleDef.href);
+        return { success: true, message: "El registro ya estaba eliminado." };
+      }
+
       return failure("No se pudo eliminar el registro: no tienes permisos suficientes sobre él.");
     }
 

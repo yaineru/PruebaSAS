@@ -1,10 +1,12 @@
 "use client";
 
 import { useLiveQuery } from "dexie-react-hooks";
-import { AlertCircle, CheckCircle2, CloudOff, RefreshCw } from "lucide-react";
+import { AlertCircle, CheckCircle2, CloudOff, RefreshCw, X } from "lucide-react";
 import { useOffline } from "@/components/offline-provider";
-import { getOfflineDb, type QueueOperationType } from "@/lib/offline/db";
+import { getOfflineDb, LEGACY_CRUD_TABLE, type QueueOperation } from "@/lib/offline/db";
+import { discardOperation } from "@/lib/offline/sync";
 import { Button } from "@/components/ui/button";
+import type { ModuleKey } from "@/lib/modules";
 
 const STATUS_LABEL: Record<string, string> = {
   PENDING: "Pendiente de sincronización",
@@ -13,23 +15,50 @@ const STATUS_LABEL: Record<string, string> = {
   FAILED: "No se pudo sincronizar"
 };
 
-// Muestra, para el módulo actual, los registros creados sin conexión que
-// todavía no llegaron a Supabase - la tabla de "Registros recientes" de
-// ModulePage solo trae filas que ya existen en el servidor, así que sin esto
-// un registro guardado offline sería invisible hasta el próximo sync exitoso,
-// dejando al usuario sin la confirmación "quedó pendiente" que pidió.
-export function PendingOperationsList({ operationType }: { operationType: QueueOperationType }) {
+const ACTION_LABEL: Record<string, string> = {
+  CREATE: "Crear",
+  UPDATE: "Editar",
+  DELETE: "Eliminar"
+};
+
+function matchesTable(op: QueueOperation, table: ModuleKey): boolean {
+  if (op.type === "CRUD") return op.table === table;
+  if (op.type === "CREATE_DOCUMENT") return table === "asset_documents";
+  const legacyTable = LEGACY_CRUD_TABLE[op.type];
+  return legacyTable === table;
+}
+
+function describeOperation(op: QueueOperation): string {
+  if (op.type === "CRUD" && op.action && op.action !== "CREATE") {
+    return `${ACTION_LABEL[op.action]}: ${op.summary}`;
+  }
+  return op.summary;
+}
+
+// Muestra, para el módulo actual, los registros creados/editados/eliminados
+// sin conexión que todavía no llegaron a Supabase - la tabla de "Registros
+// recientes" de ModulePage solo trae filas que ya existen en el servidor,
+// así que sin esto un cambio guardado offline sería invisible hasta el
+// próximo sync exitoso, dejando al usuario sin la confirmación "quedó
+// pendiente" que pidió.
+export function PendingOperationsList({ table }: { table: ModuleKey }) {
   const { scopeKey, syncNow, isSyncing } = useOffline();
 
   const operations = useLiveQuery(async () => {
     const db = getOfflineDb(scopeKey);
-    const all = await db.operations.where("type").equals(operationType).sortBy("createdAt");
-    // SYNCED se limpia de la vista después de un rato para no acumular una
-    // lista infinita, pero no se borra de Dexie de inmediato - queda un rastro
-    // corto para que la confirmación de "sincronizado" alcance a verse.
+    // No hay índice compuesto por "table" (las operaciones legacy viven bajo
+    // `type`, no `table`) - se trae todo y se filtra en memoria. La cola de
+    // un dispositivo de campo es de decenas de elementos, no miles, así que
+    // esto es más simple y suficientemente rápido que mantener un índice
+    // aparte solo para esta vista.
+    const all = await db.operations.toArray();
     const cutoff = Date.now() - 5 * 60 * 1000;
-    return all.filter((op) => op.status !== "SYNCED" || op.updatedAt > cutoff).reverse();
-  }, [scopeKey, operationType]);
+    return all
+      .filter((op) => matchesTable(op, table))
+      .filter((op) => op.status !== "DRAFT")
+      .filter((op) => op.status !== "SYNCED" || op.updatedAt > cutoff)
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }, [scopeKey, table]);
 
   if (!operations || operations.length === 0) return null;
 
@@ -56,12 +85,24 @@ export function PendingOperationsList({ operationType }: { operationType: QueueO
               <CloudOff className="h-4 w-4 shrink-0 text-amber-600" />
             )}
             <div className="min-w-0 flex-1">
-              <p className="truncate font-medium">{op.summary}</p>
+              <p className="truncate font-medium">{describeOperation(op)}</p>
               <p className="text-xs text-muted-foreground">
                 {STATUS_LABEL[op.status] ?? op.status}
                 {op.status === "FAILED" && op.lastError ? ` · ${op.lastError}` : ""}
               </p>
             </div>
+            {op.status === "FAILED" ? (
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+                title="Descartar (no se sincronizará)"
+                onClick={() => void discardOperation(scopeKey, op.id)}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            ) : null}
           </li>
         ))}
       </ul>

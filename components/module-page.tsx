@@ -16,7 +16,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DocumentActions } from "@/components/document-actions";
 import { TenantRecordForm } from "@/components/tenant-record-form";
 import { PendingOperationsList } from "@/components/pending-operations-list";
-import type { QueueOperationType } from "@/lib/offline/db";
 import { TenantRecordDeleteButton } from "@/components/tenant-record-delete-button";
 import { TenantRecordEditButton } from "@/components/tenant-record-edit-button";
 import {
@@ -30,11 +29,11 @@ import {
 
 type TenantRow = Record<string, string | number | null>;
 
-const OFFLINE_QUEUE_TYPE_BY_TABLE: Partial<Record<ModuleKey, QueueOperationType>> = {
-  maintenance_records: "CREATE_MAINTENANCE",
-  incidents: "CREATE_INCIDENT",
-  assets: "CREATE_ASSET"
-};
+// Módulos con algún tipo de soporte offline (crear, editar, eliminar o -para
+// Documentos- guardar el archivo localmente hasta poder subirlo) - el resto
+// (Informes, Informes técnicos, generated_reports) tienen su propia cola
+// especializada, no pasan por este componente genérico.
+const OFFLINE_SUPPORTED_TABLES = new Set<ModuleKey>(["assets", "projects", "maintenance_records", "incidents", "users", "asset_documents"]);
 
 export async function ModulePage({
   module,
@@ -168,9 +167,9 @@ export async function ModulePage({
               companyName={settings.companyName}
               companyId={tenant.companyId}
             />
-            {OFFLINE_QUEUE_TYPE_BY_TABLE[visibleModule.table as ModuleKey] ? (
+            {OFFLINE_SUPPORTED_TABLES.has(visibleModule.table as ModuleKey) ? (
               <div className="mt-4">
-                <PendingOperationsList operationType={OFFLINE_QUEUE_TYPE_BY_TABLE[visibleModule.table as ModuleKey]!} />
+                <PendingOperationsList table={visibleModule.table as ModuleKey} />
               </div>
             ) : null}
           </CardContent>

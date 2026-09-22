@@ -13,24 +13,44 @@ import { createClient } from "@/lib/supabase/browser";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useLiveQuery } from "dexie-react-hooks";
 import { useConnectivity } from "@/lib/offline/connectivity";
 import { useOffline } from "@/components/offline-provider";
-import { getOfflineDb, type QueueOperationType } from "@/lib/offline/db";
+import { getOfflineDb } from "@/lib/offline/db";
+
+// Mismo mapeo que FK_TABLE_BY_FIELD en lib/actions/tenant-records.ts: qué
+// tabla referencia cada campo uuid. Se usa para completar los <select> con
+// registros creados sin conexión (todavía no existen en Supabase, así que
+// nunca aparecerían en las opciones que llegaron pre-cargadas del servidor).
+const FK_TABLE_BY_FIELD: Record<string, ModuleKey> = {
+  asset_id: "assets",
+  project_id: "projects",
+  maintenance_record_id: "maintenance_records"
+};
 
 const initialState: TenantRecordActionState = {
   success: false
 };
 
-// Solo creación (no edición, no borrado) - ver reporte de la Fase 1 de modo
-// offline: registrar información nueva en campo es el caso real reportado
-// por el cliente; editar/eliminar offline abre preguntas de conflicto
-// (¿qué pasa si alguien más ya cambió ese mismo registro?) que quedan fuera
-// de este alcance a propósito.
-const OFFLINE_CREATE_TABLE_TYPES: Partial<Record<ModuleKey, QueueOperationType>> = {
-  maintenance_records: "CREATE_MAINTENANCE",
-  incidents: "CREATE_INCIDENT",
-  assets: "CREATE_ASSET"
-};
+// Tablas que soportan crear y editar sin conexión a través del motor CRUD
+// genérico de la cola offline (lib/offline/sync.ts). "asset_documents" solo
+// entra aquí para EDITAR metadata (sin archivo) - crear un documento nuevo
+// sin conexión necesita guardar el archivo como Blob, ver más abajo.
+const OFFLINE_CRUD_CREATE_TABLES = new Set<ModuleKey>(["assets", "projects", "maintenance_records", "incidents", "users"]);
+const OFFLINE_CRUD_UPDATE_TABLES = new Set<ModuleKey>([
+  "assets",
+  "projects",
+  "maintenance_records",
+  "incidents",
+  "users",
+  "asset_documents"
+]);
+// Mismo conjunto que CLIENT_ID_TABLES en lib/actions/tenant-records.ts: estas
+// tablas aceptan un id elegido por el dispositivo al crear, para que otro
+// registro creado offline en la misma sesión (ej. un Mantenimiento de una
+// Obra recién creada, también offline) pueda referenciarlo de inmediato sin
+// esperar a que sincronice primero.
+const CLIENT_ID_TABLES = new Set<ModuleKey>(["assets", "projects", "maintenance_records", "incidents", "users"]);
 
 type TenantRecordFormProps = {
   fields: ModuleField[];
@@ -77,7 +97,40 @@ export function TenantRecordForm({
   const [state, formAction, pending] = useActionState(isEdit ? updateTenantRecord : createTenantRecord, initialState);
   const { isOnline } = useConnectivity();
   const { scopeKey } = useOffline();
-  const offlineOperationType = OFFLINE_CREATE_TABLE_TYPES[table];
+  const offlineCreateSupported = !isEdit && OFFLINE_CRUD_CREATE_TABLES.has(table);
+  const offlineUpdateSupported = isEdit && OFFLINE_CRUD_UPDATE_TABLES.has(table);
+  const offlineDocumentSupported = !isEdit && table === "asset_documents";
+  const offlineSupported = offlineCreateSupported || offlineUpdateSupported || offlineDocumentSupported;
+
+  // Un registro creado sin conexión (ej. una Obra) todavía no existe en
+  // Supabase, así que nunca aparecería en las opciones de un <select> que se
+  // llenaron desde el servidor al cargar la página - sin esto, sería
+  // imposible crear offline un Mantenimiento de esa misma Obra en la misma
+  // sesión, aunque el motor de sincronización sí sabría resolver la
+  // dependencia (ver CLIENT_ID_TABLES en lib/actions/tenant-records.ts).
+  const pendingByTable = useLiveQuery(async () => {
+    const relevantFields = fields.filter((field) => field.type === "uuid" && FK_TABLE_BY_FIELD[field.name]);
+    if (relevantFields.length === 0) return {};
+    const db = getOfflineDb(scopeKey);
+    const all = await db.operations
+      .where("status")
+      .anyOf(["PENDING", "FAILED"])
+      .toArray();
+    const result: Record<string, Array<{ value: string; label: string }>> = {};
+    for (const field of relevantFields) {
+      const relatedTable = FK_TABLE_BY_FIELD[field.name];
+      result[field.name] = all
+        .filter((op) => op.type === "CRUD" && op.table === relatedTable && op.action === "CREATE" && op.recordId)
+        .map((op) => ({ value: op.recordId!, label: `${op.summary} (pendiente de sincronizar)` }));
+    }
+    return result;
+  }, [scopeKey, fields]);
+
+  function optionsForField(field: ModuleField): ModuleField["options"] {
+    const pending = pendingByTable?.[field.name];
+    if (!pending || pending.length === 0) return field.options;
+    return [...(field.options ?? []), ...pending];
+  }
 
   useEffect(() => {
     if (!state.success) return;
@@ -86,28 +139,15 @@ export function TenantRecordForm({
     onSuccess?.();
   }, [router, state.success, isEdit, onSuccess]);
 
+  function summaryFromFormData(formData: FormData): string {
+    const summaryField = fields[0]?.name;
+    return summaryField ? String(formData.get(summaryField) || "Registro sin título") : "Registro";
+  }
+
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     setOfflineMessage(null);
 
-    // Editar sin conexión no está soportado todavía (ver manual): la Server
-    // Action de todos modos fallaría con un error de red confuso, así que se
-    // corta antes con un mensaje claro en vez de dejar que eso pase.
-    if (isEdit && !isOnline) {
-      event.preventDefault();
-      setClientError("No se pueden guardar cambios sin conexión todavía. Intenta de nuevo cuando vuelva la señal.");
-      return;
-    }
-
-    // Documentos requiere subir el archivo a Storage antes de poder crear el
-    // registro (ver más abajo) - eso necesita conexión sí o sí, así que se
-    // avisa de una vez en vez de dejar que el intento de subida falle solo.
-    if (!isEdit && table === "asset_documents" && !isOnline) {
-      event.preventDefault();
-      setClientError("No se pueden cargar documentos sin conexión. Intenta de nuevo cuando vuelva la señal.");
-      return;
-    }
-
-    if (!isEdit && offlineOperationType && !isOnline) {
+    if (!isOnline && isEdit && offlineUpdateSupported && recordId) {
       event.preventDefault();
       setClientError(null);
       const form = event.currentTarget;
@@ -118,22 +158,124 @@ export function TenantRecordForm({
         const raw = formData.get(field.name);
         if (raw !== null && raw !== "") payload[field.name] = String(raw);
       }
-      const summaryField = fields[0]?.name;
-      const summary = summaryField ? String(formData.get(summaryField) || "Registro sin título") : "Registro";
 
       const db = getOfflineDb(scopeKey);
       await db.operations.add({
         id: crypto.randomUUID(),
-        type: offlineOperationType,
+        type: "CRUD",
+        table,
+        action: "UPDATE",
+        recordId,
         payload,
         status: "PENDING",
         createdAt: Date.now(),
         updatedAt: Date.now(),
         attempts: 0,
-        summary
+        summary: summaryFromFormData(formData)
+      });
+
+      setOfflineMessage("Cambios guardados sin conexión. Se sincronizarán automáticamente cuando vuelva Internet.");
+      onSuccess?.();
+      return;
+    }
+
+    // Editar un tipo que sí soporta offline-create pero no llegó con
+    // recordId (no debería pasar en la práctica) o un módulo fuera de
+    // OFFLINE_CRUD_UPDATE_TABLES: se avisa en vez de dejar que la Server
+    // Action falle con un error de red confuso.
+    if (isEdit && !isOnline && !offlineUpdateSupported) {
+      event.preventDefault();
+      setClientError("No se pueden guardar cambios sin conexión todavía. Intenta de nuevo cuando vuelva la señal.");
+      return;
+    }
+
+    if (!isEdit && offlineCreateSupported && !isOnline) {
+      event.preventDefault();
+      setClientError(null);
+      const form = event.currentTarget;
+      const formData = new FormData(form);
+
+      const payload: Record<string, unknown> = { __redirectTo: redirectTo };
+      for (const field of fields) {
+        const raw = formData.get(field.name);
+        if (raw !== null && raw !== "") payload[field.name] = String(raw);
+      }
+
+      const generatedId = CLIENT_ID_TABLES.has(table) ? crypto.randomUUID() : undefined;
+
+      const db = getOfflineDb(scopeKey);
+      await db.operations.add({
+        id: crypto.randomUUID(),
+        type: "CRUD",
+        table,
+        action: "CREATE",
+        recordId: generatedId,
+        payload,
+        status: "PENDING",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        attempts: 0,
+        summary: summaryFromFormData(formData)
       });
 
       setOfflineMessage("Guardado sin conexión. Se sincronizará automáticamente cuando vuelva Internet.");
+      form.reset();
+      return;
+    }
+
+    if (!isEdit && offlineDocumentSupported && !isOnline) {
+      event.preventDefault();
+      setClientError(null);
+      const form = event.currentTarget;
+      const file = fileRef.current?.files?.[0];
+
+      if (!file) {
+        setClientError("Selecciona un archivo para crear el documento.");
+        return;
+      }
+
+      const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+      if (!allowedDocumentTypes.has(file.type) || !allowedDocumentExtensions.has(extension)) {
+        setClientError("El tipo de archivo no está permitido.");
+        return;
+      }
+      if (file.size > maxDocumentBytes) {
+        setClientError("El archivo supera el tamaño máximo de 20 MB.");
+        return;
+      }
+
+      const formData = new FormData(form);
+      const payload: Record<string, unknown> = { __redirectTo: redirectTo, __companyId: companyId };
+      for (const field of fields) {
+        const raw = formData.get(field.name);
+        if (raw !== null && raw !== "") payload[field.name] = String(raw);
+      }
+
+      const operationId = crypto.randomUUID();
+      const db = getOfflineDb(scopeKey);
+      await db.files.add({
+        id: crypto.randomUUID(),
+        operationId,
+        fieldName: "document_file",
+        blob: file,
+        mimeType: file.type,
+        fileName: file.name,
+        createdAt: Date.now()
+      });
+      await db.operations.add({
+        id: operationId,
+        type: "CREATE_DOCUMENT",
+        payload,
+        status: "PENDING",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        attempts: 0,
+        summary: summaryFromFormData(formData)
+      });
+
+      setOfflineMessage(
+        "Documento guardado sin conexión. El archivo se subirá automáticamente cuando vuelva Internet."
+      );
       form.reset();
       return;
     }
@@ -247,7 +389,7 @@ export function TenantRecordForm({
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <option value="">Seleccionar</option>
-                {field.options.map((option) => (
+                {optionsForField(field)!.map((option) => (
                   <option value={option.value} key={option.value}>
                     {option.label}
                   </option>
@@ -266,10 +408,10 @@ export function TenantRecordForm({
           </div>
         ))}
         <Button className="w-full" disabled={pending || uploading}>
-          {!isOnline && offlineOperationType ? <CloudOff className="h-4 w-4" /> : isEdit ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+          {!isOnline && offlineSupported ? <CloudOff className="h-4 w-4" /> : isEdit ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
           {pending || uploading
             ? "Guardando..."
-            : !isOnline && offlineOperationType
+            : !isOnline && offlineSupported
               ? "Guardar sin conexión"
               : isEdit
                 ? "Guardar cambios"

@@ -63,11 +63,8 @@ const TEXT_FIELD_NAMES = [
   "technicianName",
   "activityType",
   "problemDescription",
-  "diagnosis",
   "workActivity",
   "procedure",
-  "materialsUsed",
-  "sparePartsUsed",
   "observations",
 ] as const;
 
@@ -250,11 +247,8 @@ const emptyFormState: Record<string, string> = {
   technicianName: "",
   activityType: "",
   problemDescription: "",
-  diagnosis: "",
   workActivity: "",
   procedure: "",
-  materialsUsed: "",
-  sparePartsUsed: "",
   observations: "",
 };
 
@@ -827,11 +821,6 @@ export function TechnicalReportForm({ companyId }: Props) {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="diagnosis">Diagnóstico</Label>
-              <textarea id="diagnosis" name="diagnosis" rows={3} className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={formState.diagnosis} onChange={(e) => setFormState((prev) => ({ ...prev, diagnosis: e.target.value }))} />
-            </div>
-
-            <div className="space-y-2">
               <Label htmlFor="workActivity">Actividades realizadas</Label>
               <textarea id="workActivity" name="workActivity" rows={3} className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={formState.workActivity} onChange={(e) => setFormState((prev) => ({ ...prev, workActivity: e.target.value }))} />
             </div>
@@ -839,17 +828,6 @@ export function TechnicalReportForm({ companyId }: Props) {
             <div className="space-y-2">
               <Label htmlFor="procedure">Procedimiento ejecutado</Label>
               <textarea id="procedure" name="procedure" rows={3} className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={formState.procedure} onChange={(e) => setFormState((prev) => ({ ...prev, procedure: e.target.value }))} />
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="materialsUsed">Materiales utilizados</Label>
-                <textarea id="materialsUsed" name="materialsUsed" rows={3} className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={formState.materialsUsed} onChange={(e) => setFormState((prev) => ({ ...prev, materialsUsed: e.target.value }))} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="sparePartsUsed">Repuestos utilizados</Label>
-                <textarea id="sparePartsUsed" name="sparePartsUsed" rows={3} className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={formState.sparePartsUsed} onChange={(e) => setFormState((prev) => ({ ...prev, sparePartsUsed: e.target.value }))} />
-              </div>
             </div>
 
             <div className="space-y-2">

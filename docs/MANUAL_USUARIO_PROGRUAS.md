@@ -221,7 +221,7 @@ Debajo, tres gráficos (estado de equipos, mantenimientos por mes, novedades por
 **Cómo crear uno**:
 1. "Informes técnicos".
 2. Opcionalmente seleccione un **Mantenimiento asociado** ya registrado — autocompleta varios campos.
-3. Complete cliente (obligatorio), contacto, proyecto/equipo intervenido, responsable, técnico, tipo de mantenimiento, y describa el problema (obligatorio), diagnóstico, actividades realizadas, materiales/repuestos utilizados y observaciones.
+3. Complete cliente (obligatorio), contacto, proyecto/equipo intervenido, responsable, técnico, tipo de mantenimiento, y describa el problema (obligatorio), actividades realizadas, procedimiento ejecutado y observaciones.
 4. Si aplica, agregue hasta 12 fotos de evidencia. Las fotografías de los informes técnicos pueden registrarse como **Antes**, **Después** o **Evidencia** — no es obligatorio usar pares Antes/Después: puede cargar solo fotos de Evidencia (del trabajo, de una pieza, del sitio), solo Antes, solo Después, o cualquier combinación. Cada foto trae "Evidencia" seleccionado por defecto y usted puede cambiarlo antes de generar el informe.
 5. Registre la firma del técnico y la firma del cliente (nombre, cargo, fecha y firma dibujada en pantalla).
 6. Presione **"Generar informe técnico"**.
@@ -259,7 +259,7 @@ Debajo, tres gráficos (estado de equipos, mantenimientos por mes, novedades por
 
 **Qué pasa cuando guarda sin conexión**: el registro queda marcado como **"Pendiente de sincronización"** y aparece en una lista bajo el formulario, en este mismo dispositivo. No se pierde si cierra la pestaña o la aplicación — al volver a abrirla, sigue ahí, con sus fotos y firmas incluidas. Apenas la aplicación detecta conexión real (no basta con que el teléfono "diga" que hay wifi), sincroniza automáticamente, sin que tenga que hacer nada. Si por alguna razón la sincronización falla (ej. la señal se corta a mitad de camino), el registro pasa a **"Falló - reintentar"** y puede tocarlo para intentarlo de nuevo, o descartarlo si ya no aplica; nunca se pierde y nunca se duplica, aunque guarde dos veces o se reintente varias veces.
 
-**Informes técnicos sin conexión, en detalle**: puede seleccionar un mantenimiento ya sincronizado (el listado se guarda para consultarlo sin señal), diligenciar cliente, diagnóstico, actividades y demás campos, agregar fotos (se guardan en el dispositivo, con vista previa, y puede cambiarles el tipo o borrarlas antes de enviar) y dibujar ambas firmas. Todo el progreso se guarda automáticamente cada pocos segundos mientras completa el formulario — si cierra la aplicación a la mitad y vuelve más tarde, encuentra su borrador tal como lo dejó, firmas incluidas. Al presionar "Guardar sin conexión" queda pendiente; al volver la señal, las fotos se suben, el PDF se genera con los datos, firmas y evidencia correctos, y el informe aparece en el historial exactamente igual que uno generado en línea.
+**Informes técnicos sin conexión, en detalle**: puede seleccionar un mantenimiento ya sincronizado (el listado se guarda para consultarlo sin señal), diligenciar cliente, actividades y demás campos, agregar fotos (se guardan en el dispositivo, con vista previa, y puede cambiarles el tipo o borrarlas antes de enviar) y dibujar ambas firmas. Todo el progreso se guarda automáticamente cada pocos segundos mientras completa el formulario — si cierra la aplicación a la mitad y vuelve más tarde, encuentra su borrador tal como lo dejó, firmas incluidas. Al presionar "Guardar sin conexión" queda pendiente; al volver la señal, las fotos se suben, el PDF se genera con los datos, firmas y evidencia correctos, y el informe aparece en el historial exactamente igual que uno generado en línea.
 
 **Importante para dispositivos compartidos**: lo guardado sin conexión queda asociado a la empresa y el usuario que lo creó (cada combinación usuario+empresa usa un almacenamiento separado en el dispositivo). Si otra persona inicia sesión con otra cuenta en el mismo teléfono/computador, no verá ni podrá sincronizar lo que usted dejó pendiente.
 
@@ -313,7 +313,7 @@ Opciones disponibles para Progrúas:
 **Caso 6 — Generar un informe técnico**
 1. "Informes técnicos".
 2. Opcionalmente elegir un mantenimiento asociado.
-3. Completar cliente, equipo, diagnóstico y actividades realizadas.
+3. Completar cliente, equipo, descripción del problema y actividades realizadas.
 4. Agregar fotos de evidencia y firmas.
 5. Generar; aparece en "Informes" como "Informe técnico".
 

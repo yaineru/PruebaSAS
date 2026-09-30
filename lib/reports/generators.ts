@@ -487,9 +487,7 @@ export type TechnicalReportData = {
   technicianName?: string;
   activityTypeLabel?: string;
   problemDescription?: string;
-  workActivity?: string;
   procedure?: string;
-  materialsUsed?: string;
   sparePartsUsed?: string;
   observations?: string;
   evidenceItems?: TechnicalReportEvidenceItem[];
@@ -506,9 +504,9 @@ export type TechnicalReportData = {
 /**
  * Generate Technical Report PDF
  * Professional client-facing document for a maintenance service visit:
- * client/project/equipment info, responsible/technician, work performed,
- * materials/spare parts used, one-or-more before/after evidence pairs and
- * hand-drawn signatures with role and date.
+ * client/project/equipment info, responsible/technician, problem/procedure,
+ * spare parts used, one-or-more before/after evidence pairs and hand-drawn
+ * signatures with role and date.
  */
 export async function generateTechnicalPdf(
   reportData: TechnicalReportData,
@@ -699,9 +697,7 @@ export async function generateTechnicalPdf(
     // ---- Desarrollo del servicio ----
     addSectionBar('Desarrollo del servicio', [30, 41, 59]);
     addParagraphSection('Descripción del problema', reportData.problemDescription || '');
-    addParagraphSection('Actividades realizadas', reportData.workActivity || '');
     addParagraphSection('Procedimiento ejecutado', reportData.procedure || '');
-    addParagraphSection('Materiales utilizados', reportData.materialsUsed || '');
     addParagraphSection('Repuestos utilizados', reportData.sparePartsUsed || '');
     addParagraphSection('Observaciones', reportData.observations || '');
 

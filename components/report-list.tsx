@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Download, Trash2, Loader, Mail } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Download, Trash2, Loader, Mail, Pencil } from "lucide-react";
 import { createClient } from "@/lib/supabase/browser";
 import { formatDate } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +34,7 @@ function humanizeReportError(rawMessage: string | null | undefined): string {
 }
 
 export function ReportList({ companyId }: Props) {
+  const router = useRouter();
   const [reports, setReports] = useState<GeneratedReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -279,6 +281,16 @@ export function ReportList({ companyId }: Props) {
                           <Mail className="mr-2 h-4 w-4" />
                           Enviar por correo
                         </Button>
+                        {String(report.reportType) === "TECHNICAL_REPORT" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => router.push(`/informes-tecnicos?editId=${report.id}`)}
+                          >
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Corregir
+                          </Button>
+                        )}
                       </>
                     )}
                     {report.status === "FAILED" && (

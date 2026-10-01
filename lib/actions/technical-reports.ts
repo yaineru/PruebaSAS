@@ -95,6 +95,193 @@ export async function getMaintenanceTechnicalDetails(maintenanceId: string) {
 const MAX_EVIDENCE_ITEMS = 12;
 const EVIDENCE_TYPES = new Set(['BEFORE', 'AFTER', 'EVIDENCE']);
 
+type TechnicalReportEvidencePayload = Array<{ title?: string; url?: string | null; type: 'BEFORE' | 'AFTER' | 'EVIDENCE' }>;
+
+type TechnicalReportBuild = {
+  payload: ReturnType<typeof buildTechnicalReportPayload>;
+  // Mismos campos que el formulario (components/technical-report-form.tsx
+  // TEXT_FIELD_NAMES/SIGNATURE_FIELD_NAMES) - se guarda tal cual dentro de
+  // report_metadata (jsonb, sin migración) para poder repoblar el formulario
+  // si el usuario pide corregir el informe más tarde (ver updateTechnicalReport).
+  formFieldsForEdit: Record<string, string>;
+  evidenceItems: TechnicalReportEvidencePayload;
+  pdfBuffer: Buffer;
+  companyName: string;
+  companySettings: { company_name?: string | null; logo_url?: string | null } | null;
+};
+
+function buildTechnicalReportPayload(formData: FormData) {
+  const getText = (key: string, maxLength = 2000) => sanitizeText(formData.get(key) as string, maxLength);
+
+  const activityTypeRaw = getText('activityType', 60);
+  const equipmentStatusRaw = getText('equipmentStatus', 60);
+
+  return {
+    reportDate: getText('reportDate', 10) || new Date().toISOString().slice(0, 10),
+    clientName: getText('clientName', 200),
+    clientContact: getText('clientContact', 200),
+    projectName: getText('projectName', 200),
+    projectLocation: getText('projectLocation', 200),
+    equipmentName: getText('equipment', 200),
+    assetCode: getText('assetCode', 100),
+    assetBrandModel: getText('assetBrandModel', 200),
+    equipmentStatusRaw,
+    equipmentStatusLabel: equipmentStatusRaw ? getEnumLabel('assetStatus', equipmentStatusRaw) : '',
+    responsibleName: getText('responsibleName', 200),
+    technicianName: getText('technicianName', 200),
+    activityTypeRaw,
+    activityTypeLabel: activityTypeRaw ? getEnumLabel('maintenanceType', activityTypeRaw) : '',
+    problemDescription: getText('problemDescription'),
+    procedure: getText('procedure'),
+    sparePartsUsed: getText('sparePartsUsed'),
+    observations: getText('observations'),
+    technicalSignatureImage: (formData.get('technicalSignatureImage') as string) || '',
+    technicalSignatureName: getText('technicalSignatureName', 200),
+    technicalSignatureRole: getText('technicalSignatureRole', 120),
+    technicalSignatureDate: getText('technicalSignatureDate', 10),
+    clientSignatureImage: (formData.get('clientSignatureImage') as string) || '',
+    clientSignatureName: getText('clientSignatureName', 200),
+    clientSignatureRole: getText('clientSignatureRole', 120),
+    clientSignatureDate: getText('clientSignatureDate', 10),
+    maintenanceId: (formData.get('maintenanceId') as string) || '',
+  };
+}
+
+async function buildTechnicalReportPdf(
+  formData: FormData,
+  tenant: Awaited<ReturnType<typeof getTenantContext>>,
+  supabase: Awaited<ReturnType<typeof createClient>>
+): Promise<{ success: true; data: TechnicalReportBuild } | { success: false; error: string }> {
+  const payload = buildTechnicalReportPayload(formData);
+
+  if (!payload.clientName) {
+    return { success: false, error: 'Indica el nombre del cliente.' };
+  }
+  if (!payload.problemDescription) {
+    return { success: false, error: 'Describe el problema o motivo del servicio.' };
+  }
+
+  const evidenceCount = Math.min(
+    Math.max(parseInt((formData.get('evidenceCount') as string) || '0', 10) || 0, 0),
+    MAX_EVIDENCE_ITEMS
+  );
+
+  // Evidence photos are now uploaded straight from the browser to the
+  // "reports" bucket (see components/technical-report-form.tsx) - only the
+  // resulting signed URL travels through this Server Action. Raw File
+  // objects used to arrive here and get written to the local filesystem,
+  // which is read-only on Vercel and also had no expiry/auth on the served
+  // URL; that upload path was removed entirely.
+  //
+  // Each photo is independent (no more forced Antes/Después pairing) - a
+  // real case reported by a Progrúas user: many jobs don't have a
+  // before/after as such, just several evidence photos of the work, the
+  // part, the site, etc. `type` defaults to 'EVIDENCE' if missing/invalid
+  // rather than rejecting the report, since this is display metadata, not
+  // a security boundary.
+  let evidenceItems: TechnicalReportEvidencePayload;
+  try {
+    evidenceItems = Array.from({ length: evidenceCount }, (_, index) => {
+      const url = (formData.get(`evidenceUrl_${index}`) as string) || null;
+      const title = sanitizeText(formData.get(`evidenceTitle_${index}`) as string, 150);
+      const rawType = (formData.get(`evidenceType_${index}`) as string) || '';
+      const type = (EVIDENCE_TYPES.has(rawType) ? rawType : 'EVIDENCE') as 'BEFORE' | 'AFTER' | 'EVIDENCE';
+
+      return { title: title || undefined, url, type };
+    });
+  } catch (fileError) {
+    return { success: false, error: fileError instanceof Error ? fileError.message : 'No fue posible procesar las imágenes.' };
+  }
+
+  const { data: companySettings } = await supabase
+    .from('company_settings')
+    .select('company_name, logo_url')
+    .eq('company_id', tenant.companyId)
+    .maybeSingle();
+
+  const { data: companyRecord } = await supabase
+    .from('companies')
+    .select('phone, email, website')
+    .eq('id', tenant.companyId)
+    .maybeSingle();
+
+  const companyName = companySettings?.company_name || tenant.companyName;
+  const timestamp = new Date().toISOString();
+  const reportCode = `INF-TEC-${timestamp.slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+  const pdfBuffer = await generateTechnicalPdf(
+    {
+      reportDate: payload.reportDate,
+      clientName: payload.clientName,
+      clientContact: payload.clientContact,
+      projectName: payload.projectName,
+      projectLocation: payload.projectLocation,
+      equipmentName: payload.equipmentName,
+      assetCode: payload.assetCode,
+      assetBrandModel: payload.assetBrandModel,
+      equipmentStatusLabel: payload.equipmentStatusLabel,
+      responsibleName: payload.responsibleName,
+      technicianName: payload.technicianName,
+      activityTypeLabel: payload.activityTypeLabel,
+      problemDescription: payload.problemDescription,
+      procedure: payload.procedure,
+      sparePartsUsed: payload.sparePartsUsed,
+      observations: payload.observations,
+      evidenceItems,
+      technicalSignatureImage: payload.technicalSignatureImage || null,
+      technicalSignatureName: payload.technicalSignatureName || payload.technicianName,
+      technicalSignatureRole: payload.technicalSignatureRole,
+      technicalSignatureDate: payload.technicalSignatureDate || payload.reportDate,
+      clientSignatureImage: payload.clientSignatureImage || null,
+      clientSignatureName: payload.clientSignatureName || payload.clientContact,
+      clientSignatureRole: payload.clientSignatureRole,
+      clientSignatureDate: payload.clientSignatureDate || payload.reportDate,
+    },
+    {
+      companyName,
+      companyLogoUrl: companySettings?.logo_url || undefined,
+      companyPhone: companyRecord?.phone || undefined,
+      companyEmail: companyRecord?.email || undefined,
+      companyWebsite: companyRecord?.website || undefined,
+      generatedDate: formatDateTime(new Date()),
+      reportCode,
+    }
+  );
+
+  const formFieldsForEdit: Record<string, string> = {
+    reportDate: payload.reportDate,
+    clientName: payload.clientName,
+    clientContact: payload.clientContact,
+    projectName: payload.projectName,
+    projectLocation: payload.projectLocation,
+    equipment: payload.equipmentName,
+    assetCode: payload.assetCode,
+    assetBrandModel: payload.assetBrandModel,
+    equipmentStatus: payload.equipmentStatusRaw,
+    responsibleName: payload.responsibleName,
+    technicianName: payload.technicianName,
+    activityType: payload.activityTypeRaw,
+    problemDescription: payload.problemDescription,
+    procedure: payload.procedure,
+    sparePartsUsed: payload.sparePartsUsed,
+    observations: payload.observations,
+    technicalSignatureImage: payload.technicalSignatureImage,
+    technicalSignatureName: payload.technicalSignatureName,
+    technicalSignatureRole: payload.technicalSignatureRole,
+    technicalSignatureDate: payload.technicalSignatureDate,
+    clientSignatureImage: payload.clientSignatureImage,
+    clientSignatureName: payload.clientSignatureName,
+    clientSignatureRole: payload.clientSignatureRole,
+    clientSignatureDate: payload.clientSignatureDate,
+    maintenanceId: payload.maintenanceId,
+  };
+
+  return {
+    success: true,
+    data: { payload, formFieldsForEdit, evidenceItems, pdfBuffer, companyName, companySettings: companySettings ?? null },
+  };
+}
+
 export async function generateTechnicalReport(formData: FormData) {
   let reportId: string | null = null;
   let reportSupabase: Awaited<ReturnType<typeof createClient>> | null = null;
@@ -135,138 +322,17 @@ export async function generateTechnicalReport(formData: FormData) {
       }
     }
 
-    const getText = (key: string, maxLength = 2000) => sanitizeText(formData.get(key) as string, maxLength);
+    const built = await buildTechnicalReportPdf(formData, tenant, supabase);
+    if (!built.success) return built;
+    const { payload, formFieldsForEdit, evidenceItems, pdfBuffer, companyName, companySettings } = built.data;
 
-    const activityTypeRaw = getText('activityType', 60);
-    const equipmentStatusRaw = getText('equipmentStatus', 60);
-
-    const payload = {
-      reportDate: getText('reportDate', 10) || new Date().toISOString().slice(0, 10),
-      clientName: getText('clientName', 200),
-      clientContact: getText('clientContact', 200),
-      projectName: getText('projectName', 200),
-      projectLocation: getText('projectLocation', 200),
-      equipmentName: getText('equipment', 200),
-      assetCode: getText('assetCode', 100),
-      assetBrandModel: getText('assetBrandModel', 200),
-      equipmentStatusLabel: equipmentStatusRaw ? getEnumLabel('assetStatus', equipmentStatusRaw) : '',
-      responsibleName: getText('responsibleName', 200),
-      technicianName: getText('technicianName', 200),
-      activityTypeLabel: activityTypeRaw ? getEnumLabel('maintenanceType', activityTypeRaw) : '',
-      problemDescription: getText('problemDescription'),
-      procedure: getText('procedure'),
-      sparePartsUsed: getText('sparePartsUsed'),
-      observations: getText('observations'),
-      technicalSignatureImage: (formData.get('technicalSignatureImage') as string) || '',
-      technicalSignatureName: getText('technicalSignatureName', 200),
-      technicalSignatureRole: getText('technicalSignatureRole', 120),
-      technicalSignatureDate: getText('technicalSignatureDate', 10),
-      clientSignatureImage: (formData.get('clientSignatureImage') as string) || '',
-      clientSignatureName: getText('clientSignatureName', 200),
-      clientSignatureRole: getText('clientSignatureRole', 120),
-      clientSignatureDate: getText('clientSignatureDate', 10),
-      maintenanceId: (formData.get('maintenanceId') as string) || '',
-    };
-
-    if (!payload.clientName) {
-      return { success: false, error: 'Indica el nombre del cliente.' };
-    }
-    if (!payload.problemDescription) {
-      return { success: false, error: 'Describe el problema o motivo del servicio.' };
-    }
-
-    const evidenceCount = Math.min(
-      Math.max(parseInt((formData.get('evidenceCount') as string) || '0', 10) || 0, 0),
-      MAX_EVIDENCE_ITEMS
-    );
-
-    // Evidence photos are now uploaded straight from the browser to the
-    // "reports" bucket (see components/technical-report-form.tsx) - only the
-    // resulting signed URL travels through this Server Action. Raw File
-    // objects used to arrive here and get written to the local filesystem,
-    // which is read-only on Vercel and also had no expiry/auth on the served
-    // URL; that upload path was removed entirely.
-    //
-    // Each photo is independent (no more forced Antes/Después pairing) - a
-    // real case reported by a Progrúas user: many jobs don't have a
-    // before/after as such, just several evidence photos of the work, the
-    // part, the site, etc. `type` defaults to 'EVIDENCE' if missing/invalid
-    // rather than rejecting the report, since this is display metadata, not
-    // a security boundary.
-    let evidenceItems: Array<{ title?: string; url?: string | null; type: 'BEFORE' | 'AFTER' | 'EVIDENCE' }>;
-    try {
-      evidenceItems = Array.from({ length: evidenceCount }, (_, index) => {
-        const url = (formData.get(`evidenceUrl_${index}`) as string) || null;
-        const title = sanitizeText(formData.get(`evidenceTitle_${index}`) as string, 150);
-        const rawType = (formData.get(`evidenceType_${index}`) as string) || '';
-        const type = (EVIDENCE_TYPES.has(rawType) ? rawType : 'EVIDENCE') as 'BEFORE' | 'AFTER' | 'EVIDENCE';
-
-        return { title: title || undefined, url, type };
-      });
-    } catch (fileError) {
-      return { success: false, error: fileError instanceof Error ? fileError.message : 'No fue posible procesar las imágenes.' };
-    }
-
-    const { data: companySettings } = await supabase
-      .from('company_settings')
-      .select('company_name, logo_url')
-      .eq('company_id', tenant.companyId)
-      .maybeSingle();
-
-    const { data: companyRecord } = await supabase
-      .from('companies')
-      .select('phone, email, website')
-      .eq('id', tenant.companyId)
-      .maybeSingle();
-
-    const companyName = companySettings?.company_name || tenant.companyName;
     const timestamp = new Date().toISOString();
-    const reportCode = `INF-TEC-${timestamp.slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
     const fileName = `INFORME_TECNICO_${timestamp.slice(0, 10)}_${Date.now()}.pdf`;
     // Mismo formato de ruta que lib/actions/reports.ts: el companyId debe ser el primer
     // segmento porque la policy RLS de storage.objects lo exige.
     const storagePath = `${tenant.companyId}/technical/${fileName}`;
     const publicRelativePath = `/reports/${tenant.companyId}/technical/${fileName}`;
     const localStoragePath = path.join(process.cwd(), 'public', 'reports', tenant.companyId, 'technical', fileName);
-
-    const pdfBuffer = await generateTechnicalPdf(
-      {
-        reportDate: payload.reportDate,
-        clientName: payload.clientName,
-        clientContact: payload.clientContact,
-        projectName: payload.projectName,
-        projectLocation: payload.projectLocation,
-        equipmentName: payload.equipmentName,
-        assetCode: payload.assetCode,
-        assetBrandModel: payload.assetBrandModel,
-        equipmentStatusLabel: payload.equipmentStatusLabel,
-        responsibleName: payload.responsibleName,
-        technicianName: payload.technicianName,
-        activityTypeLabel: payload.activityTypeLabel,
-        problemDescription: payload.problemDescription,
-        procedure: payload.procedure,
-        sparePartsUsed: payload.sparePartsUsed,
-        observations: payload.observations,
-        evidenceItems,
-        technicalSignatureImage: payload.technicalSignatureImage || null,
-        technicalSignatureName: payload.technicalSignatureName || payload.technicianName,
-        technicalSignatureRole: payload.technicalSignatureRole,
-        technicalSignatureDate: payload.technicalSignatureDate || payload.reportDate,
-        clientSignatureImage: payload.clientSignatureImage || null,
-        clientSignatureName: payload.clientSignatureName || payload.clientContact,
-        clientSignatureRole: payload.clientSignatureRole,
-        clientSignatureDate: payload.clientSignatureDate || payload.reportDate,
-      },
-      {
-        companyName,
-        companyLogoUrl: companySettings?.logo_url || undefined,
-        companyPhone: companyRecord?.phone || undefined,
-        companyEmail: companyRecord?.email || undefined,
-        companyWebsite: companyRecord?.website || undefined,
-        generatedDate: formatDateTime(new Date()),
-        reportCode,
-      }
-    );
 
     // Sube a Supabase Storage primero; si falla (bucket no disponible, red, etc.)
     // cae a un archivo local en /public como respaldo, igual que en reports.ts.
@@ -317,10 +383,14 @@ export async function generateTechnicalReport(formData: FormData) {
       equipmentName: payload.equipmentName,
       responsibleName: payload.responsibleName,
       technicianName: payload.technicianName,
+      // Guarda todos los campos del formulario (jsonb, sin migración) para
+      // poder repoblarlo si el usuario pide corregir el informe más tarde -
+      // ver updateTechnicalReport y el modo edición en TechnicalReportForm.
+      formPayload: formFieldsForEdit,
     };
     const signatures = [
-      { label: 'Firma técnico', name: payload.technicalSignatureName || payload.technicianName || undefined },
-      { label: 'Firma cliente', name: payload.clientSignatureName || payload.clientContact || undefined },
+      { label: 'Firma de entrega', name: payload.technicalSignatureName || payload.technicianName || undefined },
+      { label: 'Firma de recibido', name: payload.clientSignatureName || payload.clientContact || undefined },
     ];
 
     const generatedReportsInsertPayload = {
@@ -466,6 +536,158 @@ export async function generateTechnicalReport(formData: FormData) {
     return {
       success: false,
       error: 'No fue posible generar el informe técnico. Intenta de nuevo.',
+    };
+  }
+}
+
+/**
+ * Carga los datos de un informe técnico ya generado para repoblar el
+ * formulario cuando el usuario pide corregirlo (ver formPayload guardado en
+ * report_metadata dentro de generateTechnicalReport/updateTechnicalReport).
+ */
+export async function getTechnicalReportForEdit(reportId: string) {
+  try {
+    await assertSameOrigin();
+    await assertRateLimit('getTechnicalReportForEdit', 60);
+
+    const tenant = await getTenantContext();
+    const supabase = await createClient();
+
+    const { data: report, error } = await supabase
+      .from('generated_reports')
+      .select('id, report_type, report_metadata, evidence_items')
+      .eq('id', reportId)
+      .eq('company_id', tenant.companyId)
+      .maybeSingle();
+
+    if (error || !report || report.report_type !== 'TECHNICAL_REPORT') {
+      return { success: false, error: 'No se encontró el informe técnico a corregir.' };
+    }
+
+    const metadata = (report.report_metadata || {}) as Record<string, unknown>;
+    const formPayload = (metadata.formPayload || {}) as Record<string, string>;
+    const evidenceItems = (report.evidence_items || []) as Array<{ title?: string; url?: string | null; type?: string }>;
+
+    return { success: true, formPayload, evidenceItems };
+  } catch (error) {
+    console.error('TECHNICAL_REPORT_LOAD_FOR_EDIT_ERROR', error);
+    return { success: false, error: 'No fue posible cargar el informe técnico.' };
+  }
+}
+
+/**
+ * Corrige un informe técnico ya generado: vuelve a construir el PDF con los
+ * datos editados y reemplaza el archivo y los metadatos del mismo registro en
+ * generated_reports (misma fila, nuevo archivo en Storage) en vez de crear un
+ * informe nuevo - así el historial no se llena de duplicados por cada
+ * corrección y el enlace ya compartido con el cliente puede re-descargarse
+ * corregido.
+ */
+export async function updateTechnicalReport(reportId: string, formData: FormData) {
+  try {
+    await assertSameOrigin();
+    await assertRateLimit('updateTechnicalReport', 10);
+
+    const tenant = await getTenantContext();
+    const supabase = await createClient();
+
+    const { data: existing, error: fetchError } = await supabase
+      .from('generated_reports')
+      .select('id, file_path, report_type')
+      .eq('id', reportId)
+      .eq('company_id', tenant.companyId)
+      .maybeSingle();
+
+    if (fetchError || !existing) {
+      return { success: false, error: 'No se encontró el informe técnico a corregir.' };
+    }
+    if (existing.report_type !== 'TECHNICAL_REPORT') {
+      return { success: false, error: 'Este informe no se puede corregir.' };
+    }
+
+    const built = await buildTechnicalReportPdf(formData, tenant, supabase);
+    if (!built.success) return built;
+    const { payload, formFieldsForEdit, evidenceItems, pdfBuffer } = built.data;
+
+    const timestamp = new Date().toISOString();
+    const fileName = `INFORME_TECNICO_${timestamp.slice(0, 10)}_${Date.now()}.pdf`;
+    const storagePath = `${tenant.companyId}/technical/${fileName}`;
+
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('reports')
+      .upload(storagePath, pdfBuffer, { contentType: 'application/pdf', upsert: false });
+
+    if (uploadError || !uploadData) {
+      console.error('TECHNICAL_REPORT_UPDATE_STORAGE_ERROR', uploadError);
+      return { success: false, error: 'No fue posible guardar el PDF corregido.' };
+    }
+
+    const { data: urlData, error: urlError } = await supabase.storage
+      .from('reports')
+      .createSignedUrl(storagePath, 3600);
+
+    if (urlError || !urlData?.signedUrl) {
+      return { success: false, error: 'No se pudo generar el enlace del informe corregido.' };
+    }
+
+    const reportMetadata = {
+      clientName: payload.clientName,
+      clientContact: payload.clientContact,
+      projectName: payload.projectName,
+      equipmentName: payload.equipmentName,
+      responsibleName: payload.responsibleName,
+      technicianName: payload.technicianName,
+      formPayload: formFieldsForEdit,
+    };
+    const signatures = [
+      { label: 'Firma de entrega', name: payload.technicalSignatureName || payload.technicianName || undefined },
+      { label: 'Firma de recibido', name: payload.clientSignatureName || payload.clientContact || undefined },
+    ];
+
+    const { error: updateError } = await supabase
+      .from('generated_reports')
+      .update({
+        file_path: uploadData.path,
+        file_url: urlData.signedUrl,
+        file_size_bytes: pdfBuffer.length,
+        status: 'READY',
+        error_message: null,
+        report_metadata: reportMetadata,
+        evidence_items: evidenceItems,
+        signatures,
+        filters: { maintenanceId: payload.maintenanceId, clientName: payload.clientName },
+        filters_applied: { maintenanceId: payload.maintenanceId, clientName: payload.clientName },
+      })
+      .eq('id', reportId);
+
+    if (updateError) {
+      console.error('TECHNICAL_REPORT_UPDATE_ERROR', updateError);
+      // El PDF corregido ya quedó subido con un nombre nuevo - se limpia para
+      // no dejar un archivo huérfano si la fila no se pudo actualizar.
+      await supabase.storage.from('reports').remove([uploadData.path]).then(null, () => undefined);
+      return { success: false, error: 'No fue posible actualizar el informe técnico.' };
+    }
+
+    // Mejor esfuerzo: borra el PDF anterior ahora que el nuevo ya quedó
+    // registrado - si falla, el archivo viejo queda huérfano en Storage pero
+    // ya no afecta nada (ninguna fila lo referencia).
+    if (existing.file_path && existing.file_path !== uploadData.path) {
+      await supabase.storage.from('reports').remove([existing.file_path]).then(null, () => undefined);
+    }
+
+    await trackAnalyticsEvent('UPDATE_TECHNICAL_REPORT');
+
+    return {
+      success: true,
+      reportId,
+      downloadUrl: urlData.signedUrl,
+      message: 'Informe técnico corregido correctamente.',
+    };
+  } catch (error) {
+    console.error('TECHNICAL_REPORT_UPDATE_UNEXPECTED_ERROR', error);
+    return {
+      success: false,
+      error: 'No fue posible corregir el informe técnico. Intenta de nuevo.',
     };
   }
 }

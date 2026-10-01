@@ -814,7 +814,7 @@ export async function generateTechnicalPdf(
     };
     drawSignatureBox(
       margin,
-      'Firma del técnico',
+      'Firma de quien entrega',
       reportData.technicalSignatureName || reportData.technicianName || '',
       reportData.technicalSignatureRole || '',
       reportData.technicalSignatureDate || reportData.reportDate || '',
@@ -822,7 +822,7 @@ export async function generateTechnicalPdf(
     );
     drawSignatureBox(
       margin + signatureWidth + 6,
-      'Firma del cliente',
+      'Firma de quien recibe',
       reportData.clientSignatureName || reportData.clientContact || '',
       reportData.clientSignatureRole || '',
       reportData.clientSignatureDate || reportData.reportDate || '',

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Eraser } from "lucide-react";
+import { Eraser, ImageUp } from "lucide-react";
 
 type Props = {
   label: string;
@@ -24,12 +24,14 @@ type Props = {
  */
 export function SignaturePad({ label, name, defaultName = "", defaultRole = "", defaultDate = "", initialDataUrl = "" }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasSignature, setHasSignature] = useState(Boolean(initialDataUrl));
   const [dataUrl, setDataUrl] = useState(initialDataUrl);
   const [signerName, setSignerName] = useState(defaultName);
   const [signerRole, setSignerRole] = useState(defaultRole);
   const [signerDate, setSignerDate] = useState(defaultDate || new Date().toISOString().slice(0, 10));
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -112,6 +114,55 @@ export function SignaturePad({ label, name, defaultName = "", defaultRole = "", 
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     setHasSignature(false);
     setDataUrl("");
+    setUploadError(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  // Alternativa a dibujar: a veces quien debe firmar no está presente (ej. la
+  // persona que recibe el servicio) pero sí hay una imagen de su firma ya
+  // escaneada/fotografiada - se dibuja centrada sobre fondo blanco en el
+  // mismo canvas, manteniendo proporción, para que quede igual de incrustada
+  // en el PDF que una firma dibujada a mano.
+  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setUploadError(null);
+
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setUploadError("Solo se aceptan imágenes JPG, PNG o WebP.");
+      event.target.value = "";
+      return;
+    }
+    if (file.size > 4 * 1024 * 1024) {
+      setUploadError("La imagen supera el tamaño máximo de 4 MB.");
+      event.target.value = "";
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+        const drawWidth = img.width * scale;
+        const drawHeight = img.height * scale;
+        const offsetX = (canvas.width - drawWidth) / 2;
+        const offsetY = (canvas.height - drawHeight) / 2;
+        ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
+        setDataUrl(canvas.toDataURL("image/png"));
+        setHasSignature(true);
+      };
+      img.onerror = () => setUploadError("No se pudo leer la imagen. Intenta con otro archivo.");
+      img.src = String(reader.result);
+    };
+    reader.onerror = () => setUploadError("No se pudo leer la imagen. Intenta con otro archivo.");
+    reader.readAsDataURL(file);
   };
 
   return (
@@ -153,12 +204,25 @@ export function SignaturePad({ label, name, defaultName = "", defaultRole = "", 
       </div>
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          {hasSignature ? "Firma capturada" : "Dibuja la firma con el mouse o el dedo"}
+          {hasSignature ? "Firma capturada" : "Dibuja la firma o sube una imagen"}
         </p>
-        <Button type="button" size="sm" variant="ghost" onClick={clear}>
-          <Eraser className="mr-1 h-3.5 w-3.5" /> Limpiar
-        </Button>
+        <div className="flex items-center gap-1">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="hidden"
+            onChange={handleImageUpload}
+          />
+          <Button type="button" size="sm" variant="ghost" onClick={() => fileInputRef.current?.click()}>
+            <ImageUp className="mr-1 h-3.5 w-3.5" /> Subir imagen
+          </Button>
+          <Button type="button" size="sm" variant="ghost" onClick={clear}>
+            <Eraser className="mr-1 h-3.5 w-3.5" /> Limpiar
+          </Button>
+        </div>
       </div>
+      {uploadError ? <p className="text-xs text-destructive">{uploadError}</p> : null}
       <input type="hidden" name={`${name}Image`} value={dataUrl} />
       <input type="hidden" name={`${name}Name`} value={signerName} />
       <input type="hidden" name={`${name}Role`} value={signerRole} />

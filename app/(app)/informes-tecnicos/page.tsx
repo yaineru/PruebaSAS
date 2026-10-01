@@ -8,8 +8,13 @@ export const metadata = {
   title: "Informes técnicos"
 };
 
-export default async function TechnicalReportsPage() {
+export default async function TechnicalReportsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ editId?: string }>;
+}) {
   const tenant = await getTenantContext();
+  const { editId } = await searchParams;
 
   if (!['ADMIN', 'SUPERVISOR', 'OPERARIO'].includes(tenant.role)) {
     redirect('/dashboard');
@@ -33,7 +38,7 @@ export default async function TechnicalReportsPage() {
           </p>
         </div>
 
-        <TechnicalReportForm companyId={tenant.companyId} />
+        <TechnicalReportForm companyId={tenant.companyId} editReportId={editId} />
       </div>
     </div>
   );

@@ -1,21 +1,32 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/browser";
-import { generateTechnicalReport, getMaintenanceTechnicalDetails } from "@/lib/actions/technical-reports";
+import {
+  generateTechnicalReport,
+  getMaintenanceTechnicalDetails,
+  getTechnicalReportForEdit,
+  updateTechnicalReport,
+} from "@/lib/actions/technical-reports";
 import { ENUM_OPTIONS } from "@/lib/enums";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SignaturePad } from "@/components/signature-pad";
-import { Loader, FileText, CheckCircle, AlertCircle, ImageIcon, Plus, Trash2, CloudOff } from "lucide-react";
+import { Loader, FileText, CheckCircle, AlertCircle, ImageIcon, Plus, Trash2, CloudOff, Pencil } from "lucide-react";
 import { useConnectivity } from "@/lib/offline/connectivity";
 import { useOffline } from "@/components/offline-provider";
 import { getOfflineDb, type QueueFile } from "@/lib/offline/db";
 
 type Props = {
   companyId: string;
+  // Presente cuando se llega desde "Corregir" en components/report-list.tsx -
+  // activa el modo edición: carga los datos del informe ya generado en vez
+  // de restaurar un borrador local, y al enviar reemplaza ese mismo informe
+  // en lugar de crear uno nuevo (ver updateTechnicalReport).
+  editReportId?: string;
 };
 
 type MaintenanceOption = {
@@ -252,7 +263,9 @@ const emptyFormState: Record<string, string> = {
   observations: "",
 };
 
-export function TechnicalReportForm({ companyId }: Props) {
+export function TechnicalReportForm({ companyId, editReportId }: Props) {
+  const isEditMode = Boolean(editReportId);
+  const router = useRouter();
   const [maintenances, setMaintenances] = useState<MaintenanceOption[]>([]);
   const [selectedMaintenanceId, setSelectedMaintenanceId] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -262,6 +275,7 @@ export function TechnicalReportForm({ companyId }: Props) {
   const [evidencePhotos, setEvidencePhotos] = useState<EvidencePhoto[]>([]);
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [draftRestoredNotice, setDraftRestoredNotice] = useState(false);
+  const [editLoadError, setEditLoadError] = useState<string | null>(null);
   const [signatureRestore, setSignatureRestore] = useState<Record<string, string>>({});
   // SignaturePad guarda el trazo dibujado solo en su propio estado interno,
   // sin ninguna forma externa de "limpiarlo" - cambiar su `key` fuerza a
@@ -326,12 +340,61 @@ export function TechnicalReportForm({ companyId }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId]);
 
+  // En modo edición se carga el informe ya generado (ver "Corregir" en
+  // components/report-list.tsx) en vez del borrador local - son dos orígenes
+  // de datos mutuamente excluyentes, por eso el efecto de abajo (borrador
+  // local) se salta por completo cuando hay un editReportId.
+  useEffect(() => {
+    if (!editReportId) return;
+
+    (async () => {
+      const result = await getTechnicalReportForEdit(editReportId);
+      if (!result.success || !result.formPayload) {
+        setEditLoadError(result.error || "No fue posible cargar el informe a corregir.");
+        setDraftLoaded(true);
+        return;
+      }
+
+      const payload = result.formPayload;
+      setFormState((prev) => {
+        const next = { ...prev };
+        for (const key of TEXT_FIELD_NAMES) {
+          if (payload[key] !== undefined) next[key] = payload[key];
+        }
+        return next;
+      });
+      if (payload.maintenanceId) setSelectedMaintenanceId(payload.maintenanceId);
+
+      const signatures: Record<string, string> = {};
+      for (const key of SIGNATURE_FIELD_NAMES) {
+        if (payload[key]) signatures[key] = payload[key];
+      }
+      setSignatureRestore(signatures);
+
+      const evidenceItems = (result.evidenceItems || []) as Array<{ title?: string; url?: string | null; type?: string }>;
+      setEvidencePhotos(
+        evidenceItems
+          .filter((item) => item.url)
+          .map((item) => ({
+            clientId: crypto.randomUUID(),
+            title: item.title || "",
+            url: item.url as string,
+            type: (item.type === "BEFORE" || item.type === "AFTER" ? item.type : "EVIDENCE") as EvidenceType,
+          }))
+      );
+
+      setDraftLoaded(true);
+    })();
+  }, [editReportId]);
+
   // Al montar, revisa si ya hay un borrador guardado en este dispositivo
   // (ver el autosave más abajo) y lo restaura antes de mostrar el
   // formulario - las firmas (SignaturePad) solo leen su valor inicial una
   // vez al montar, así que el formulario no se muestra hasta que la
   // restauración (asíncrona, lee IndexedDB) termina.
   useEffect(() => {
+    if (editReportId) return;
+
     (async () => {
       const db = getOfflineDb(scopeKey);
       const existingDraft = await db.operations
@@ -391,6 +454,10 @@ export function TechnicalReportForm({ companyId }: Props) {
       setDraftRestoredNotice(true);
       setDraftLoaded(true);
     })();
+    // editReportId no cambia durante la vida del componente (viene de un
+    // query param leído una sola vez por la página) - no hace falta que
+    // dispare este efecto de nuevo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopeKey]);
 
   // Espejos en ref de todo lo que el autoguardado necesita leer "al vuelo" -
@@ -420,7 +487,7 @@ export function TechnicalReportForm({ companyId }: Props) {
   // fijo, no atado a "qué cambió", precisamente para no depender de que el
   // usuario también haya tocado un campo de texto justo después de firmar.
   useEffect(() => {
-    if (!draftLoaded) return;
+    if (!draftLoaded || isEditMode) return;
 
     const saveDraft = async () => {
       const formState = formStateRef.current;
@@ -465,6 +532,9 @@ export function TechnicalReportForm({ companyId }: Props) {
 
     const interval = setInterval(() => void saveDraft(), 2000);
     return () => clearInterval(interval);
+    // isEditMode no cambia durante la vida del componente (se deriva de un
+    // prop fijo) - no hace falta que dispare este efecto de nuevo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftLoaded, scopeKey, companyId]);
 
   const handleMaintenanceChange = async (maintenanceId: string) => {
@@ -578,6 +648,31 @@ export function TechnicalReportForm({ companyId }: Props) {
       if (!photo.pendingLocal) formData.set(`evidenceUrl_${index}`, photo.url);
     });
 
+    if (isEditMode) {
+      // Corregir un informe requiere conexión: no tiene sentido encolar una
+      // corrección sin conexión para un informe que el cliente ya pudo haber
+      // recibido - a diferencia de crear uno nuevo, aquí se prefiere fallar
+      // claro en vez de resolver un caso offline que no fue pedido.
+      if (!isOnline) {
+        setError("Para corregir un informe necesitas conexión a internet.");
+        setIsLoading(false);
+        return;
+      }
+      try {
+        const result = await updateTechnicalReport(editReportId as string, formData);
+        if (result.success) {
+          setMessage(result.message || "Informe técnico corregido correctamente.");
+        } else {
+          setError(result.error || "No fue posible corregir el informe técnico.");
+        }
+      } catch {
+        setError("No fue posible corregir el informe técnico. Verifica tu conexión e intenta de nuevo.");
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
     if (!isOnline) {
       try {
         const db = getOfflineDb(scopeKey);
@@ -679,17 +774,33 @@ export function TechnicalReportForm({ companyId }: Props) {
     <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
       <Card>
         <CardHeader>
-          <CardTitle>Nuevo informe técnico</CardTitle>
-          <CardDescription>Completa el formulario y genera un PDF listo para entregar al cliente.</CardDescription>
+          <CardTitle>{isEditMode ? "Corregir informe técnico" : "Nuevo informe técnico"}</CardTitle>
+          <CardDescription>
+            {isEditMode
+              ? "Edita los datos necesarios y guarda la corrección: se reemplaza el mismo informe ya entregado."
+              : "Completa el formulario y genera un PDF listo para entregar al cliente."}
+          </CardDescription>
         </CardHeader>
         <CardContent>
+          {editLoadError ? (
+            <div className="mb-4 flex items-center gap-2 rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4" />
+              <span>{editLoadError}</span>
+            </div>
+          ) : null}
           {draftRestoredNotice ? (
             <div className="mb-4 flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-800">
               <CheckCircle className="h-4 w-4" />
               <span>Se restauró un borrador guardado en este dispositivo.</span>
             </div>
           ) : null}
-          {!isOnline ? (
+          {!isOnline && isEditMode ? (
+            <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              <CloudOff className="h-4 w-4" />
+              <span>Sin conexión: para corregir y guardar este informe necesitas conexión a internet.</span>
+            </div>
+          ) : null}
+          {!isOnline && !isEditMode ? (
             <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
               <CloudOff className="h-4 w-4" />
               <span>
@@ -897,7 +1008,7 @@ export function TechnicalReportForm({ companyId }: Props) {
             <div className="grid gap-4 md:grid-cols-2">
               <SignaturePad
                 key={`technical-${formResetCounter}`}
-                label="Firma del técnico"
+                label="Firma de quien entrega"
                 name="technicalSignature"
                 defaultName={signatureRestore.technicalSignatureName || formState.technicianName}
                 defaultRole={signatureRestore.technicalSignatureRole}
@@ -906,7 +1017,7 @@ export function TechnicalReportForm({ companyId }: Props) {
               />
               <SignaturePad
                 key={`client-${formResetCounter}`}
-                label="Firma del cliente"
+                label="Firma de quien recibe"
                 name="clientSignature"
                 defaultName={signatureRestore.clientSignatureName || formState.clientContact}
                 defaultRole={signatureRestore.clientSignatureRole}
@@ -923,16 +1034,27 @@ export function TechnicalReportForm({ companyId }: Props) {
             ) : null}
 
             {message ? (
-              <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
-                <CheckCircle className="h-4 w-4" />
-                <span>{message}</span>
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+                <span className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  {message}
+                </span>
+                {isEditMode ? (
+                  <Button type="button" size="sm" variant="outline" onClick={() => router.push("/informes")}>
+                    Volver a informes
+                  </Button>
+                ) : null}
               </div>
             ) : null}
 
-            <Button type="submit" disabled={isLoading} className="w-full">
+            <Button type="submit" disabled={isLoading || (isEditMode && !isOnline)} className="w-full">
               {isLoading ? (
                 <>
                   <Loader className="mr-2 h-4 w-4 animate-spin" /> Guardando...
+                </>
+              ) : isEditMode ? (
+                <>
+                  <Pencil className="mr-2 h-4 w-4" /> Guardar corrección
                 </>
               ) : !isOnline ? (
                 <>
@@ -956,7 +1078,7 @@ export function TechnicalReportForm({ companyId }: Props) {
         <CardContent className="space-y-3 text-sm text-muted-foreground">
           <p>• Se integra con activos, mantenimientos, usuarios y empresas.</p>
           <p>• Al elegir un mantenimiento, el sistema autocompleta proyecto, equipo, responsable y observaciones.</p>
-          <p>• Las firmas se capturan a mano (mouse o dedo) y se incrustan como imagen en el PDF.</p>
+          <p>• Las firmas se pueden dibujar a mano (mouse o dedo) o subir como imagen, y se incrustan en el PDF.</p>
           <p>• El PDF se guarda para descarga y se registra en el historial de informes.</p>
           <p>• Sin conexión, puedes completar todo (datos, fotos, firmas) y quedará &quot;Pendiente de generación&quot; hasta que vuelva Internet.</p>
         </CardContent>

@@ -216,17 +216,19 @@ Debajo, tres gráficos (estado de equipos, mantenimientos por mes, novedades por
 
 ## 11. Informes técnicos
 
-**Para qué sirven**: generar un informe formal de una visita de mantenimiento a un cliente, con firma digital del técnico y del cliente, y evidencia fotográfica. Disponible para ADMIN, SUPERVISOR y OPERARIO.
+**Para qué sirven**: generar un informe formal de una visita de mantenimiento a un cliente, con firma de quien entrega y de quien recibe el servicio, y evidencia fotográfica. Disponible para ADMIN, SUPERVISOR y OPERARIO.
 
 **Cómo crear uno**:
 1. "Informes técnicos".
 2. Opcionalmente seleccione un **Mantenimiento asociado** ya registrado — autocompleta varios campos.
 3. Complete cliente (obligatorio), contacto, proyecto/equipo intervenido, responsable, técnico, tipo de mantenimiento, y describa el problema (obligatorio), procedimiento ejecutado, repuestos utilizados y observaciones.
 4. Si aplica, agregue hasta 12 fotos de evidencia. Las fotografías de los informes técnicos pueden registrarse como **Antes**, **Después** o **Evidencia** — no es obligatorio usar pares Antes/Después: puede cargar solo fotos de Evidencia (del trabajo, de una pieza, del sitio), solo Antes, solo Después, o cualquier combinación. Cada foto trae "Evidencia" seleccionado por defecto y usted puede cambiarlo antes de generar el informe.
-5. Registre la firma del técnico y la firma del cliente (nombre, cargo, fecha y firma dibujada en pantalla).
+5. Registre la **firma de quien entrega** y la **firma de quien recibe** (nombre, cargo, fecha, y la firma en sí). Cada firma se puede **dibujar en pantalla** (mouse o dedo) o, si la persona no está presente, **subir una imagen** ya existente de su firma con el botón "Subir imagen".
 6. Presione **"Generar informe técnico"**.
 
 **Cómo se descarga**: se genera en PDF y aparece automáticamente en el historial de "Informes" (marcado "Informe técnico"), desde donde se ve, descarga o envía por correo igual que cualquier otro informe.
+
+**Corregir un informe ya generado**: si después de generarlo nota un error (un dato mal escrito, una firma equivocada, etc.), vaya a "Informes", busque el informe técnico y presione **"Corregir"**. Esto abre el mismo formulario con los datos ya cargados — edite lo que necesite y presione **"Guardar corrección"**: el PDF se vuelve a generar y reemplaza al anterior (mismo registro en el historial, no se crea uno duplicado). Corregir un informe requiere conexión a internet.
 
 ## 12. Modo sin conexión (offline)
 

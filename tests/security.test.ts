@@ -81,4 +81,16 @@ describe("sanitizeText", () => {
   it("recorta espacios en los extremos", () => {
     expect(sanitizeText("  hola  ")).toBe("hola");
   });
+
+  it("por defecto elimina saltos de línea (campos de una sola línea, ej. encabezados de correo)", () => {
+    expect(sanitizeText("Línea 1\nLínea 2")).toBe("Línea 1Línea 2");
+  });
+
+  it("con multiline:true conserva los saltos de línea (ej. un textarea)", () => {
+    expect(sanitizeText("1. tornillos\n2. cuerdas", 500, { multiline: true })).toBe("1. tornillos\n2. cuerdas");
+  });
+
+  it("con multiline:true normaliza \\r\\n a \\n sin dejar línea en blanco de más", () => {
+    expect(sanitizeText("uno\r\ndos", 500, { multiline: true })).toBe("uno\ndos");
+  });
 });

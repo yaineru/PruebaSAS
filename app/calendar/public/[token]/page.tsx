@@ -76,7 +76,7 @@ export default async function PublicCalendarPage({ params }: PageProps) {
                         <p style={{ margin: "0.25rem 0 0", fontSize: 13, color: "#64748b" }}>📍 {activity.location}</p>
                       ) : null}
                       {share.public_visibility === "FULL" && activity.description ? (
-                        <p style={{ margin: "0.25rem 0 0", fontSize: 13, color: "#64748b" }}>{activity.description}</p>
+                        <p style={{ margin: "0.25rem 0 0", fontSize: 13, color: "#64748b", whiteSpace: "pre-wrap" }}>{activity.description}</p>
                       ) : null}
                     </>
                   )}

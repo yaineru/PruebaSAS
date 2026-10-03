@@ -112,6 +112,11 @@ type TechnicalReportBuild = {
 
 function buildTechnicalReportPayload(formData: FormData) {
   const getText = (key: string, maxLength = 2000) => sanitizeText(formData.get(key) as string, maxLength);
+  // Estos cuatro sí vienen de un <textarea> real (components/technical-report-form.tsx)
+  // - conservan los saltos de línea que el usuario escribió (ej. una lista
+  // numerada en "Observaciones") en vez de aplastarlos en una sola línea.
+  const getMultilineText = (key: string, maxLength = 2000) =>
+    sanitizeText(formData.get(key) as string, maxLength, { multiline: true });
 
   const activityTypeRaw = getText('activityType', 60);
   const equipmentStatusRaw = getText('equipmentStatus', 60);
@@ -131,10 +136,10 @@ function buildTechnicalReportPayload(formData: FormData) {
     technicianName: getText('technicianName', 200),
     activityTypeRaw,
     activityTypeLabel: activityTypeRaw ? getEnumLabel('maintenanceType', activityTypeRaw) : '',
-    problemDescription: getText('problemDescription'),
-    procedure: getText('procedure'),
-    sparePartsUsed: getText('sparePartsUsed'),
-    observations: getText('observations'),
+    problemDescription: getMultilineText('problemDescription'),
+    procedure: getMultilineText('procedure'),
+    sparePartsUsed: getMultilineText('sparePartsUsed'),
+    observations: getMultilineText('observations'),
     technicalSignatureImage: (formData.get('technicalSignatureImage') as string) || '',
     technicalSignatureName: getText('technicalSignatureName', 200),
     technicalSignatureRole: getText('technicalSignatureRole', 120),

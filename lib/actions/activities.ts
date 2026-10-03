@@ -16,14 +16,14 @@ function parseActivityForm(formData: FormData) {
 
   return createActivitySchema.parse({
     title: sanitizeText(formData.get('title') as string, 200),
-    description: sanitizeText((formData.get('description') as string) || '', 2000) || undefined,
+    description: sanitizeText((formData.get('description') as string) || '', 2000, { multiline: true }) || undefined,
     startAt: formData.get('startAt') as string,
     endAt: formData.get('endAt') as string,
     allDay: formData.get('allDay') === 'true',
     activityTypeId: (formData.get('activityTypeId') as string) || undefined,
     ownerUserId: (formData.get('ownerUserId') as string) || undefined,
     location: sanitizeText((formData.get('location') as string) || '', 300) || undefined,
-    notes: sanitizeText((formData.get('notes') as string) || '', 2000) || undefined,
+    notes: sanitizeText((formData.get('notes') as string) || '', 2000, { multiline: true }) || undefined,
     reminderOffsets,
     isPrivate: formData.get('isPrivate') === 'true',
     priority: ((formData.get('priority') as string) || 'MEDIUM') as 'LOW' | 'MEDIUM' | 'HIGH',

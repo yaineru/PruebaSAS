@@ -27,11 +27,21 @@ function checkMemoryFallback(key: string, limit: number, windowMs: number): bool
   return true;
 }
 
-export function sanitizeText(value: unknown, max = 500) {
-  const text = String(value ?? "")
-    .replace(/<[^>]*>/g, "")
-    .replace(/[\u0000-\u001F\u007F]/g, "")
-    .trim();
+// `multiline: true` es solo para contenido libre que viene de un <textarea>
+// real (descripciones, procedimientos, el cuerpo de un correo) - conserva los
+// saltos de línea (\u000A) que el usuario escribió, en vez de aplastarlos en
+// una sola línea corrida. El default (false) sigue eliminando TODOS los
+// caracteres de control, \u000A incluido, y debe mantenerse así para
+// cualquier valor que pueda terminar en un encabezado de correo (From,
+// Reply-To, Subject, To, CC) u otro campo de una sola línea: un salto de
+// línea ahí habilitaría inyección de encabezados (CRLF injection), no es
+// una limitación arbitraria.
+export function sanitizeText(value: unknown, max = 500, { multiline = false }: { multiline?: boolean } = {}) {
+  const withoutTags = String(value ?? "").replace(/<[^>]*>/g, "");
+  // \u000D (retorno de carro) siempre se elimina, incluso en modo multilínea,
+  // así "\r\n" (Windows) queda como "\n" sin dejar una línea en blanco de más.
+  const controlCharsPattern = multiline ? /[\u0000-\u0009\u000B-\u001F\u007F]/g : /[\u0000-\u001F\u007F]/g;
+  const text = withoutTags.replace(controlCharsPattern, "").trim();
 
   return text.length > max ? text.slice(0, max) : text;
 }

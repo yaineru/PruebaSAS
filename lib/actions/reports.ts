@@ -913,7 +913,7 @@ export async function sendReportByEmail(reportId: string, formData: FormData): P
     const to = sanitizeText(formData.get('to'), 255);
     const cc = sanitizeText(formData.get('cc') || '', 255);
     const subjectInput = sanitizeText(formData.get('subject') || '', 200);
-    const message = sanitizeText(formData.get('message') || '', 2000);
+    const message = sanitizeText(formData.get('message') || '', 2000, { multiline: true });
 
     const emailSchema = z.string().email();
     if (!emailSchema.safeParse(to).success) {

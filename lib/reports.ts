@@ -35,6 +35,10 @@ export type GeneratedReport = {
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
+  // Solo presente en informes técnicos generados desde que existe "Corregir"
+  // (ver lib/actions/technical-reports.ts) - components/report-list.tsx lo
+  // usa para decidir si mostrar ese botón.
+  reportMetadata?: Record<string, unknown>;
 };
 
 export type ReportFilters = {

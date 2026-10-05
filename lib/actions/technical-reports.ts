@@ -571,6 +571,18 @@ export async function getTechnicalReportForEdit(reportId: string) {
 
     const metadata = (report.report_metadata || {}) as Record<string, unknown>;
     const formPayload = (metadata.formPayload || {}) as Record<string, string>;
+
+    // Informes generados antes de que existiera "Corregir" (antes del
+    // 2026-10-01) nunca guardaron el formulario completo, solo un resumen -
+    // no hay nada que repoblar. Sin este chequeo, el formulario se mostraba
+    // vacío sin ninguna explicación, como si "no cargara" la información.
+    if (Object.keys(formPayload).length === 0) {
+      return {
+        success: false,
+        error: 'Este informe se generó antes de que existiera la opción de corregir, así que no quedó guardada la información para recargarlo. Genera un informe nuevo con los datos corregidos.',
+      };
+    }
+
     const evidenceItems = (report.evidence_items || []) as Array<{ title?: string; url?: string | null; type?: string }>;
 
     return { success: true, formPayload, evidenceItems };

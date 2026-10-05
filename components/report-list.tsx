@@ -116,7 +116,16 @@ export function ReportList({ companyId }: Props) {
     errorMessage: (row.error_message ?? row.errorMessage ?? null) as string | null,
     createdAt: (row.created_at ?? row.createdAt ?? new Date().toISOString()) as string,
     updatedAt: (row.updated_at ?? row.updatedAt ?? row.created_at ?? new Date().toISOString()) as string,
+    reportMetadata: (row.report_metadata ?? undefined) as Record<string, unknown> | undefined,
   });
+
+  // Informes técnicos generados antes de que existiera "Corregir" (antes del
+  // 2026-10-01) nunca guardaron el formulario completo - mostrar el botón ahí
+  // llevaba a un formulario vacío sin explicación, como si "no cargara" nada.
+  const canCorrect = (report: GeneratedReport) => {
+    const formPayload = report.reportMetadata?.formPayload as Record<string, unknown> | undefined;
+    return Boolean(formPayload && Object.keys(formPayload).length > 0);
+  };
 
   const handleDelete = async (reportId: string) => {
     if (!confirm("¿Eliminar este informe?")) return;
@@ -281,7 +290,7 @@ export function ReportList({ companyId }: Props) {
                           <Mail className="mr-2 h-4 w-4" />
                           Enviar por correo
                         </Button>
-                        {String(report.reportType) === "TECHNICAL_REPORT" && (
+                        {String(report.reportType) === "TECHNICAL_REPORT" && canCorrect(report) && (
                           <Button
                             size="sm"
                             variant="outline"

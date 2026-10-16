@@ -44,6 +44,24 @@ export function formatDateTime(value?: string | Date | null) {
   }).format(date);
 }
 
+// Igual que formatDateTime pero sin la hora - para cuando el valor es un
+// momento real (ej. "Fecha de generación" de un informe técnico) pero la
+// hora no aporta nada al lector. No reutiliza formatDate(): esa función no
+// fija zona horaria (pensada para columnas `date` ya ancladas a un día de
+// calendario vía sus partes Y/M/D) y por eso NO es segura para un
+// `new Date()` real - en el servidor de Vercel (UTC) rendería el día UTC,
+// que cerca de medianoche en Bogotá (UTC-5) ya puede ser el día siguiente.
+export function formatDateOnly(value?: string | Date | null) {
+  if (!value) return "Sin fecha";
+  const date = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return "Sin fecha";
+
+  return new Intl.DateTimeFormat("es-CO", {
+    dateStyle: "medium",
+    timeZone: BOGOTA_TIME_ZONE
+  }).format(date);
+}
+
 export function formatTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";

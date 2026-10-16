@@ -8,7 +8,7 @@ import { assertSameOrigin, assertRateLimit, sanitizeText } from '@/lib/security'
 import { getEnumLabel } from '@/lib/enums';
 import { generateTechnicalPdf } from '@/lib/reports/generators';
 import { trackAnalyticsEvent } from '@/lib/actions/notifications';
-import { formatDateTime } from '@/lib/utils';
+import { formatDateOnly } from '@/lib/utils';
 
 export async function getMaintenanceTechnicalDetails(maintenanceId: string) {
   try {
@@ -248,7 +248,7 @@ async function buildTechnicalReportPdf(
       companyPhone: companyRecord?.phone || undefined,
       companyEmail: companyRecord?.email || undefined,
       companyWebsite: companyRecord?.website || undefined,
-      generatedDate: formatDateTime(new Date()),
+      generatedDate: formatDateOnly(new Date()),
       reportCode,
     }
   );

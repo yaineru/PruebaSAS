@@ -4,7 +4,7 @@ import jsPDF, { GState } from 'jspdf';
 import ExcelJS from 'exceljs';
 import sharp from 'sharp';
 import { darkenHex, hexToRgb, resolveTemplateColorHex } from '@/lib/reports/color-palette';
-import { formatDateTime } from '@/lib/utils';
+import { formatDateTime, formatDateOnly } from '@/lib/utils';
 import { normalizeEvidenceItems, EVIDENCE_TYPE_LABELS } from '@/lib/reports/technical-evidence';
 import type { TechnicalReportEvidenceItem } from '@/lib/reports/technical-evidence';
 export type {
@@ -581,7 +581,7 @@ export async function generateTechnicalPdf(
       doc.setFontSize(8);
       doc.text('Documento entregable al cliente', textX, 28);
       doc.setFontSize(7.6);
-      doc.text(`Fecha de generación: ${options.generatedDate || formatDateTime(new Date())}`, pageWidth - margin, 28, { align: 'right' });
+      doc.text(`Fecha de generación: ${options.generatedDate || formatDateOnly(new Date())}`, pageWidth - margin, 28, { align: 'right' });
 
       return 48;
     };
@@ -652,16 +652,44 @@ export async function generateTechnicalPdf(
       yPosition += 16;
     };
 
+    const PARAGRAPH_LINE_HEIGHT = 4.2;
+
+    // Antes, ensureSpace solo verificaba si el párrafo COMPLETO cabía en lo
+    // que quedaba de página DESPUÉS de dibujar la barra del título - un
+    // procedimiento largo no cabía entero, así que todo el bloque saltaba a
+    // la página siguiente dejando el título solo al fondo de la página
+    // anterior y un hueco en blanco hasta el pie. Ahora: (1) el título solo
+    // se dibuja si además caben sus primeras líneas (evita títulos
+    // huérfanos), y (2) el cuerpo se dibuja en bloques que sí caben en cada
+    // página, continuando en la siguiente en vez de saltar entero.
     const addParagraphSection = (title: string, value: string) => {
       const text = value?.trim() || 'Sin información registrada.';
-      const splitText = doc.splitTextToSize(text, contentWidth - 6);
+      const splitText = doc.splitTextToSize(text, contentWidth - 6) as string[];
+
+      const keepWithLines = Math.min(splitText.length, 3);
+      ensureSpace(11 + keepWithLines * PARAGRAPH_LINE_HEIGHT + 4);
       addSectionBar(title);
-      ensureSpace(splitText.length * 4.2 + 4);
+
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
       doc.setTextColor(51, 65, 85);
-      doc.text(splitText, margin + 3, yPosition + 2);
-      yPosition += splitText.length * 4.2 + 6;
+
+      let index = 0;
+      while (index < splitText.length) {
+        const availableHeight = pageHeight - footerReserve - yPosition - 2;
+        const maxLines = Math.max(1, Math.floor(availableHeight / PARAGRAPH_LINE_HEIGHT));
+        const chunk = splitText.slice(index, index + maxLines);
+        doc.text(chunk, margin + 3, yPosition + 2);
+        yPosition += chunk.length * PARAGRAPH_LINE_HEIGHT;
+        index += chunk.length;
+
+        if (index < splitText.length) {
+          drawFooter();
+          doc.addPage();
+          yPosition = drawHeader();
+        }
+      }
+      yPosition += 6;
     };
 
     // ---- Información del cliente ----

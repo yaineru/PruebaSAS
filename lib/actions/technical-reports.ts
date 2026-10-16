@@ -115,7 +115,14 @@ function buildTechnicalReportPayload(formData: FormData) {
   // Estos cuatro sí vienen de un <textarea> real (components/technical-report-form.tsx)
   // - conservan los saltos de línea que el usuario escribió (ej. una lista
   // numerada en "Observaciones") en vez de aplastarlos en una sola línea.
-  const getMultilineText = (key: string, maxLength = 2000) =>
+  // maxLength por defecto MUCHO más alto que el de getText: el PDF ya pagina
+  // correctamente contenido largo (ver addParagraphSection en
+  // lib/reports/generators.ts), así que el límite de 2000 caracteres que
+  // tenía antes (heredado del límite por defecto de getText, pensado para
+  // campos de una línea) cortaba en silencio un procedimiento largo a mitad
+  // de palabra antes de que el PDF llegara a verlo - confirmado en
+  // producción con un "Procedimiento ejecutado" real de ~6000 caracteres.
+  const getMultilineText = (key: string, maxLength = 20000) =>
     sanitizeText(formData.get(key) as string, maxLength, { multiline: true });
 
   const activityTypeRaw = getText('activityType', 60);

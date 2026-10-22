@@ -658,7 +658,24 @@ export async function generateTechnicalPdf(
       yPosition += 16;
     };
 
-    const PARAGRAPH_LINE_HEIGHT = 4.2;
+    // CAUSA RAÍZ del hueco en blanco reportado por Nathalie (confirmado
+    // reproduciendo con el texto real de su informe y midiendo las
+    // coordenadas Y de cada línea con pdfjs-dist, no solo inspeccionando el
+    // propio contador interno): este valor estaba FIJO en 4.2mm, un número
+    // inventado que NUNCA coincidió con el espaciado entre líneas que jsPDF
+    // realmente usa al dibujar un array multilínea con doc.text(array, x, y)
+    // - para Helvetica 9pt es ~3.65mm, no 4.2mm. Cada línea de texto REAL
+    // ocupaba menos espacio vertical del que este código asumía al avanzar
+    // yPosition, así que el error se acumulaba línea por línea: invisible en
+    // párrafos cortos (1-2mm, nadie lo nota), pero ~30mm en un procedimiento
+    // de 30+ líneas envueltas - exactamente el caso real que generó el hueco
+    // entre "Procedimiento ejecutado" y "Repuestos utilizados", y que además
+    // empujó "Evidencias fotográficas" a páginas adicionales sin motivo.
+    // getLineHeight() de jsPDF devuelve el valor en puntos internos (pt), no
+    // en las unidades del documento (mm) - hay que dividirlo por scaleFactor.
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    const PARAGRAPH_LINE_HEIGHT = doc.getLineHeight() / (doc.internal as unknown as { scaleFactor: number }).scaleFactor;
 
     // Antes, ensureSpace solo verificaba si el párrafo COMPLETO cabía en lo
     // que quedaba de página DESPUÉS de dibujar la barra del título - un
@@ -686,7 +703,12 @@ export async function generateTechnicalPdf(
         const maxLines = Math.max(1, Math.floor(availableHeight / PARAGRAPH_LINE_HEIGHT));
         const chunk = splitText.slice(index, index + maxLines);
         doc.text(chunk, margin + 3, yPosition + 2);
-        yPosition += chunk.length * PARAGRAPH_LINE_HEIGHT;
+        // Avanza según la altura REAL que jsPDF acaba de dibujar (medida con
+        // su propia función, no una multiplicación aproximada) - así el
+        // contador nunca puede desviarse de lo que el documento muestra
+        // visualmente, sin importar diferencias de redondeo o de fórmula
+        // interna entre versiones de la librería.
+        yPosition += doc.getTextDimensions(chunk as unknown as string).h;
         index += chunk.length;
 
         if (index < splitText.length) {

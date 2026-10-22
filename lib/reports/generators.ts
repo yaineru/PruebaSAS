@@ -575,7 +575,7 @@ export async function generateTechnicalPdf(
       doc.text(`N.° de informe: ${options.reportCode || 'SIN-CODIGO'}`, pageWidth - margin, 12, { align: 'right' });
 
       doc.setFontSize(13.5);
-      doc.text('INFORME TÉCNICO DE MANTENIMIENTO', textX, 21);
+      doc.text('INFORME TÉCNICO', textX, 21);
 
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);

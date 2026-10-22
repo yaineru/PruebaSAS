@@ -40,13 +40,15 @@ export const ENUM_OPTIONS = {
   // su propio catálogo. Repite los 4 valores de mantenimiento (mismos
   // códigos) para que el autocompletado desde un mantenimiento asociado
   // (handleMaintenanceChange) siga resolviendo la etiqueta correcta, y
-  // agrega las 3 actividades de montaje/realce que Progrúas pidió.
+  // agrega las 4 actividades de montaje/realce que Progrúas pidió (torre
+  // grúa y malacate, cada una en sus dos variantes).
   technicalReportActivityType: [
     { value: "PREVENTIVE", label: "Preventivo", aliases: ["preventivo", "preventive"] },
     { value: "CORRECTIVE", label: "Correctivo", aliases: ["correctivo", "corrective"] },
     { value: "INSPECTION", label: "Inspección", aliases: ["inspeccion", "inspection"] },
     { value: "EMERGENCY", label: "Emergencia", aliases: ["emergencia", "emergency"] },
     { value: "TOWER_CRANE_RAISE", label: "Realce de torre grúa", aliases: ["realce de torre grua", "realce torre grua"] },
+    { value: "WINCH_RAISE", label: "Realce de malacate", aliases: ["realce de malacate", "realce malacate"] },
     { value: "WINCH_ASSEMBLY", label: "Montaje de malacate", aliases: ["montaje de malacate", "montaje malacate"] },
     { value: "TOWER_CRANE_ASSEMBLY", label: "Montaje de torre grúa", aliases: ["montaje de torre grua", "montaje torre grua"] }
   ],

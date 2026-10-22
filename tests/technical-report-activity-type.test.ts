@@ -2,15 +2,17 @@ import { describe, expect, it } from "vitest";
 import { coerceEnumValue, ENUM_OPTIONS, getEnumLabel } from "@/lib/enums";
 
 // Progrúas S.A.S. (golden tenant) pidió agregar montaje/realce de torre grúa
-// y montaje de malacate como "Tipo de actividad" seleccionable al crear un
-// informe técnico. Ese campo es texto libre guardado en report_metadata
-// (jsonb) - nunca pasa por el enum nativo de Postgres `maintenance_type`
+// y montaje/realce de malacate como "Tipo de actividad" seleccionable al
+// crear un informe técnico ("Realce de malacate" se agregó en un segundo
+// pase, después de que el primero solo cubriera 3 de las 4 actividades
+// pedidas). Ese campo es texto libre guardado en report_metadata (jsonb) -
+// nunca pasa por el enum nativo de Postgres `maintenance_type`
 // (maintenance_records.type), así que vive en su PROPIO catálogo
 // (`technicalReportActivityType`), separado de `maintenanceType` (el que sí
 // está atado 1:1 al enum de la base de datos para el módulo de
 // Mantenimientos). Este test existe para que un cambio futuro no termine
-// agregando estas tres actividades al catálogo equivocado - eso rompería
-// el módulo de Mantenimientos en producción, porque Postgres rechazaría
+// agregando estas actividades al catálogo equivocado - eso rompería el
+// módulo de Mantenimientos en producción, porque Postgres rechazaría
 // cualquier valor fuera de su enum.
 describe("técnicoReportActivityType (incorporación de montaje/realce para Progrúas)", () => {
   it("conserva los 4 tipos de mantenimiento existentes sin cambiar su significado", () => {
@@ -21,8 +23,8 @@ describe("técnicoReportActivityType (incorporación de montaje/realce para Prog
     }
   });
 
-  it("agrega las 3 actividades nuevas solicitadas por Progrúas, sin tocar el catálogo de mantenimiento", () => {
-    const nuevas = ["Realce de torre grúa", "Montaje de malacate", "Montaje de torre grúa"];
+  it("agrega las 4 actividades nuevas solicitadas por Progrúas, sin tocar el catálogo de mantenimiento", () => {
+    const nuevas = ["Realce de torre grúa", "Realce de malacate", "Montaje de malacate", "Montaje de torre grúa"];
     for (const label of nuevas) {
       expect(ENUM_OPTIONS.technicalReportActivityType.some((o) => o.label === label)).toBe(true);
       // El catálogo de mantenimiento (atado al enum real de Postgres) NO
@@ -38,9 +40,10 @@ describe("técnicoReportActivityType (incorporación de montaje/realce para Prog
     expect(new Set(values).size).toBe(values.length);
   });
 
-  it("coerceEnumValue y getEnumLabel resuelven las 3 actividades nuevas por valor, por label y por alias", () => {
+  it("coerceEnumValue y getEnumLabel resuelven las 4 actividades nuevas por valor, por label y por alias", () => {
     const cases: Array<{ value: string; label: string; alias: string }> = [
       { value: "TOWER_CRANE_RAISE", label: "Realce de torre grúa", alias: "realce torre grua" },
+      { value: "WINCH_RAISE", label: "Realce de malacate", alias: "realce malacate" },
       { value: "WINCH_ASSEMBLY", label: "Montaje de malacate", alias: "montaje malacate" },
       { value: "TOWER_CRANE_ASSEMBLY", label: "Montaje de torre grúa", alias: "montaje torre grua" },
     ];

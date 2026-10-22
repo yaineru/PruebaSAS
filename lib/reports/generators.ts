@@ -771,7 +771,7 @@ export async function generateTechnicalPdf(
     ]);
     addFieldRow([
       { label: 'Estado del equipo', value: reportData.equipmentStatusLabel || '—', width: (contentWidth - 2) / 2 },
-      { label: 'Tipo de mantenimiento', value: reportData.activityTypeLabel || '—', width: (contentWidth - 2) / 2 },
+      { label: 'Tipo de actividad', value: reportData.activityTypeLabel || '—', width: (contentWidth - 2) / 2 },
     ]);
 
     // ---- Responsables ----

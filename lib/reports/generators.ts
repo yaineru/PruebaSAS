@@ -616,8 +616,14 @@ export async function generateTechnicalPdf(
       }
     };
 
-    const addSectionBar = (title: string, color: [number, number, number] = [15, 118, 110]) => {
-      ensureSpace(11);
+    // minFollow: cuánto espacio reservar, además de la barra misma, para que
+    // al menos algo de contenido quede junto al título - sin esto, un
+    // encabezado de categoría (ej. "Desarrollo del servicio") puede quedar
+    // solo al fondo de una página si lo que sigue no cabe, el mismo patrón
+    // de título huérfano que ya causó el hueco en blanco confirmado en la
+    // sección de evidencias fotográficas.
+    const addSectionBar = (title: string, color: [number, number, number] = [15, 118, 110], minFollow = 0) => {
+      ensureSpace(11 + minFollow);
       doc.setFillColor(color[0], color[1], color[2]);
       doc.roundedRect(margin, yPosition, contentWidth, 7, 1, 1, 'F');
       doc.setFont('helvetica', 'bold');
@@ -723,7 +729,7 @@ export async function generateTechnicalPdf(
     ]);
 
     // ---- Desarrollo del servicio ----
-    addSectionBar('Desarrollo del servicio', [30, 41, 59]);
+    addSectionBar('Desarrollo del servicio', [30, 41, 59], 15);
     addParagraphSection('Descripción del problema', reportData.problemDescription || '');
     addParagraphSection('Procedimiento ejecutado', reportData.procedure || '');
     addParagraphSection('Repuestos utilizados', reportData.sparePartsUsed || '');
@@ -736,9 +742,24 @@ export async function generateTechnicalPdf(
     // solo evidencia suelta. Ahora se agrupa por tipo y solo se dibuja un
     // subtítulo para los tipos que realmente tienen fotos: nunca una caja
     // vacía de "Antes" o "Después" cuando no hay ninguna.
-    addSectionBar('Evidencias fotográficas');
     const evidenceHeight = 62;
     const evidenceWidth = (contentWidth - 6) / 2;
+
+    // hasAnyEvidence se calcula ANTES de dibujar la barra "Evidencias
+    // fotográficas": el minFollow que se le pasa tiene que cubrir lo que
+    // realmente sigue. Un minFollow fijo de 16 (el tamaño del mensaje "Sin
+    // evidencia") no alcanzaba cuando SÍ había fotos - la barra pasaba su
+    // propio chequeo, pero el primer grupo (10+evidenceHeight+10 ≈ 92mm) no
+    // cabía detrás y saltaba de página de todos modos, dejando la barra
+    // "Evidencias fotográficas" huérfana un nivel más arriba que el bug ya
+    // corregido del subtítulo "Antes/Después/Evidencia".
+    const evidenceByTypePreview = (['BEFORE', 'AFTER', 'EVIDENCE'] as const).map((type) => ({
+      type,
+      photos: resolvedEvidence.filter((item) => item.type === type),
+    }));
+    const hasAnyEvidencePreview = evidenceByTypePreview.some((group) => group.photos.length > 0);
+    addSectionBar('Evidencias fotográficas', undefined, hasAnyEvidencePreview ? 10 + evidenceHeight + 10 : 16);
+
     const drawEvidenceBox = (x: number, y: number, caption: string | undefined, image: string | null) => {
       doc.setFillColor(248, 250, 252);
       doc.setDrawColor(203, 213, 225);
@@ -766,11 +787,8 @@ export async function generateTechnicalPdf(
       }
     };
 
-    const evidenceByType = (['BEFORE', 'AFTER', 'EVIDENCE'] as const).map((type) => ({
-      type,
-      photos: resolvedEvidence.filter((item) => item.type === type),
-    }));
-    const hasAnyEvidence = evidenceByType.some((group) => group.photos.length > 0);
+    const evidenceByType = evidenceByTypePreview;
+    const hasAnyEvidence = hasAnyEvidencePreview;
 
     if (!hasAnyEvidence) {
       ensureSpace(16);
@@ -783,7 +801,17 @@ export async function generateTechnicalPdf(
       for (const group of evidenceByType) {
         if (group.photos.length === 0) continue;
 
-        ensureSpace(10);
+        // Mismo bug que ya se corrigió en addParagraphSection: el subtítulo
+        // ("Antes"/"Después"/"Evidencia") solo reservaba espacio para sí
+        // mismo (ensureSpace(10)), no para al menos la primera fila de
+        // fotos que le sigue. Con pocos mm libres al fondo de una página,
+        // el subtítulo SÍ cabía y se dibujaba, pero la primera fila de
+        // fotos (ensureSpace(evidenceHeight + 10) = 72mm) no cabía y
+        // forzaba el salto de página - dejando el subtítulo solo, con un
+        // hueco en blanco enorme hasta el pie, y todas las fotos del grupo
+        // empujadas en bloque a la página siguiente. Confirmado con un
+        // informe real de Progrúas (10 fotos tipo "Evidencia").
+        ensureSpace(10 + evidenceHeight + 10);
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(9.5);
         doc.setTextColor(15, 23, 42);
@@ -803,8 +831,13 @@ export async function generateTechnicalPdf(
     }
 
     // ---- Firmas ----
-    addSectionBar('Firmas y autorización');
+    // Mismo patrón de título huérfano, un tercer caso: la barra "Firmas y
+    // autorización" solo reservaba espacio para sí misma, no para las cajas
+    // de firma que la siguen - con la evidencia fotográfica llenando el
+    // resto de una página, la barra quedaba sola al fondo y ambas firmas
+    // saltaban enteras a la página siguiente.
     const signatureHeight = 40;
+    addSectionBar('Firmas y autorización', undefined, signatureHeight + 4);
     ensureSpace(signatureHeight + 4);
     const signatureWidth = (contentWidth - 6) / 2;
     const drawSignatureBox = (

@@ -27,6 +27,29 @@ export const ENUM_OPTIONS = {
     { value: "INSPECTION", label: "Inspección", aliases: ["inspeccion", "inspection"] },
     { value: "EMERGENCY", label: "Emergencia", aliases: ["emergencia", "emergency"] }
   ],
+  // Catálogo propio del informe técnico (components/technical-report-form.tsx,
+  // campo "Tipo de actividad") - a propósito NO es el mismo array que
+  // `maintenanceType`. Ese otro catálogo está atado 1:1 al enum nativo de
+  // Postgres `maintenance_type` (ver maintenance_records.type en
+  // supabase/migrations/001_initial_multitenant_schema.sql): agregarle
+  // "Montaje de torre grúa" también lo habilitaría en el módulo de
+  // Mantenimientos y Postgres rechazaría el insert porque ese valor no
+  // existiría en el enum de la base de datos. El campo "Tipo de actividad"
+  // del informe técnico, en cambio, es texto libre guardado en
+  // report_metadata (jsonb) - nunca pasa por ese enum - así que puede tener
+  // su propio catálogo. Repite los 4 valores de mantenimiento (mismos
+  // códigos) para que el autocompletado desde un mantenimiento asociado
+  // (handleMaintenanceChange) siga resolviendo la etiqueta correcta, y
+  // agrega las 3 actividades de montaje/realce que Progrúas pidió.
+  technicalReportActivityType: [
+    { value: "PREVENTIVE", label: "Preventivo", aliases: ["preventivo", "preventive"] },
+    { value: "CORRECTIVE", label: "Correctivo", aliases: ["correctivo", "corrective"] },
+    { value: "INSPECTION", label: "Inspección", aliases: ["inspeccion", "inspection"] },
+    { value: "EMERGENCY", label: "Emergencia", aliases: ["emergencia", "emergency"] },
+    { value: "TOWER_CRANE_RAISE", label: "Realce de torre grúa", aliases: ["realce de torre grua", "realce torre grua"] },
+    { value: "WINCH_ASSEMBLY", label: "Montaje de malacate", aliases: ["montaje de malacate", "montaje malacate"] },
+    { value: "TOWER_CRANE_ASSEMBLY", label: "Montaje de torre grúa", aliases: ["montaje de torre grua", "montaje torre grua"] }
+  ],
   maintenanceStatus: [
     { value: "PENDING", label: "Pendiente", aliases: ["pendiente", "pending"] },
     { value: "SCHEDULED", label: "Programado", aliases: ["programado", "scheduled"] },

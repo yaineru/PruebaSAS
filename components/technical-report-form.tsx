@@ -907,7 +907,7 @@ export function TechnicalReportForm({ companyId, editReportId }: Props) {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="activityType">Tipo de mantenimiento</Label>
+                <Label htmlFor="activityType">Tipo de actividad</Label>
                 <select
                   id="activityType"
                   name="activityType"
@@ -916,7 +916,7 @@ export function TechnicalReportForm({ companyId, editReportId }: Props) {
                   onChange={(e) => setFormState((prev) => ({ ...prev, activityType: e.target.value }))}
                 >
                   <option value="">Selecciona un tipo</option>
-                  {ENUM_OPTIONS.maintenanceType.map((option) => (
+                  {ENUM_OPTIONS.technicalReportActivityType.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>

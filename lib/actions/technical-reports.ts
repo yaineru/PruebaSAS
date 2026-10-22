@@ -142,7 +142,11 @@ function buildTechnicalReportPayload(formData: FormData) {
     responsibleName: getText('responsibleName', 200),
     technicianName: getText('technicianName', 200),
     activityTypeRaw,
-    activityTypeLabel: activityTypeRaw ? getEnumLabel('maintenanceType', activityTypeRaw) : '',
+    // Catálogo propio del informe técnico (lib/enums.ts
+    // technicalReportActivityType), no el de maintenance_records.type -
+    // incluye Realce/Montaje de torre grúa y Montaje de malacate, que no
+    // existen en el enum de Postgres de mantenimientos.
+    activityTypeLabel: activityTypeRaw ? getEnumLabel('technicalReportActivityType', activityTypeRaw) : '',
     problemDescription: getMultilineText('problemDescription'),
     procedure: getMultilineText('procedure'),
     sparePartsUsed: getMultilineText('sparePartsUsed'),

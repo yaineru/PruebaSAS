@@ -583,6 +583,28 @@ export async function generateTechnicalPdf(
       doc.setFontSize(7.6);
       doc.text(`Fecha de generación: ${options.generatedDate || formatDateOnly(new Date())}`, pageWidth - margin, 28, { align: 'right' });
 
+      // CAUSA RAÍZ del segundo hueco en blanco reportado por Nathalie (texto
+      // real de un informe de Progrúas reproducido y verificado con
+      // pdfjs-dist: el texto SÍ estaba en el PDF, en las coordenadas
+      // correctas, pero invisible). Arriba se deja doc.setTextColor en
+      // blanco (255,255,255) para que el texto del encabezado se lea sobre
+      // la barra azul oscura - correcto ahí, pero jsPDF no tiene "color por
+      // defecto de la página": ese blanco queda activo para cualquier texto
+      // que se dibuje después, sobre el fondo blanco de la página. Cada sitio
+      // que dibuja contenido justo después de drawHeader() fija su propio
+      // color antes de escribir (addSectionBar, addField, las cajas de firma
+      // y evidencia), así que el blanco nunca se notaba - excepto en
+      // addParagraphSection: cuando un párrafo no cabe entero y continúa en
+      // una página nueva, el bucle vuelve a llamar a drawHeader() pero NO
+      // vuelve a fijar el color del cuerpo antes de seguir dibujando, así que
+      // esa continuación se pintaba en blanco sobre blanco - invisible, pero
+      // presente (por eso pdfjs-dist sí la encontraba). Restaurar aquí el
+      // color por defecto del cuerpo hace que CUALQUIER llamador que olvide
+      // fijar su propio color quede a salvo, no solo este caso puntual.
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(51, 65, 85);
+
       return 48;
     };
 
@@ -699,6 +721,15 @@ export async function generateTechnicalPdf(
 
       let index = 0;
       while (index < splitText.length) {
+        // Reafirma el estilo del cuerpo en CADA iteración, no solo antes del
+        // bucle: drawHeader() (llamado más abajo cuando el párrafo no cabe
+        // entero) deja el color de texto en blanco para su propio rótulo y
+        // nunca lo restaura. Sin este reset, el fragmento que continúa en la
+        // página nueva se dibujaba en blanco sobre blanco - invisible, el
+        // "hueco en blanco" real que reportó Nathalie en su segundo video.
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(51, 65, 85);
         const availableHeight = pageHeight - footerReserve - yPosition - 2;
         const maxLines = Math.max(1, Math.floor(availableHeight / PARAGRAPH_LINE_HEIGHT));
         const chunk = splitText.slice(index, index + maxLines);

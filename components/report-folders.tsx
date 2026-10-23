@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SendReportEmailModal } from "@/components/send-report-email-modal";
-import { formatDate, formatDateOnly } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 import { REPORT_ENTITY_LABELS } from "@/lib/reports/entity-labels";
 import { MONTH_NAMES_ES } from "@/lib/reports/report-folders";
 import {
@@ -174,8 +174,15 @@ export function ReportFolders({ companyId }: Props) {
       <div className="min-w-0">
         <p className="font-medium truncate">{getReportLabel(report.reportType)}</p>
         <p className="text-xs text-muted-foreground">
+          {/* reportDate es un valor de solo fecha ("YYYY-MM-DD") - formatDate
+              lo ancla al día calendario correcto (ver su propio comentario en
+              lib/utils.ts); formatDateOnly asume un momento real y lo
+              reinterpreta en hora de Bogotá, lo que corría "2026-05-01" un
+              día hacia atrás en pantalla (confirmado en vivo durante la
+              verificación de esta función: la carpeta correcta era "Mayo"
+              pero el texto decía "30/04/2026"). */}
           {report.reportDate
-            ? `Fecha del informe: ${formatDateOnly(report.reportDate)}`
+            ? `Fecha del informe: ${formatDate(report.reportDate)}`
             : `Creado: ${formatDate(report.createdAt)}`}
           {" · "}
           {report.reportFormat === "EXCEL" ? "Excel" : report.reportFormat}

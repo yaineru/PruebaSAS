@@ -108,6 +108,11 @@ type TechnicalReportBuild = {
   pdfBuffer: Buffer;
   companyName: string;
   companySettings: { company_name?: string | null; logo_url?: string | null } | null;
+  // Ya validado contra `projects` filtrado por company_id - null si vino
+  // vacío o si no pertenece a esta empresa. Es lo único que
+  // generateTechnicalReport/updateTechnicalReport escriben en la columna
+  // generated_reports.project_id (ver carpetas en lib/reports/report-folders.ts).
+  resolvedProjectId: string | null;
 };
 
 function buildTechnicalReportPayload(formData: FormData) {
@@ -160,6 +165,12 @@ function buildTechnicalReportPayload(formData: FormData) {
     clientSignatureRole: getText('clientSignatureRole', 120),
     clientSignatureDate: getText('clientSignatureDate', 10),
     maintenanceId: (formData.get('maintenanceId') as string) || '',
+    // Vínculo opcional a un proyecto REAL (projects.id), distinto de
+    // projectName (texto libre, ver el campo de arriba). Se valida contra la
+    // empresa del tenant en buildTechnicalReportPdf antes de guardarse en la
+    // columna generated_reports.project_id - este valor crudo nunca se
+    // escribe directo, podría venir manipulado desde el cliente.
+    linkedProjectIdRaw: (formData.get('linkedProjectId') as string) || '',
   };
 }
 
@@ -220,6 +231,24 @@ async function buildTechnicalReportPdf(
     .select('phone, email, website')
     .eq('id', tenant.companyId)
     .maybeSingle();
+
+  // Nunca se confía en linkedProjectIdRaw tal cual - viene de un <select>
+  // del navegador y podría manipularse para apuntar al project_id de otra
+  // empresa. Se resuelve consultando `projects` filtrado por company_id: si
+  // no existe o pertenece a otra empresa, resolvedProjectId queda en null
+  // (el informe se guarda igual, simplemente sin carpeta de proyecto - ver
+  // "Sin proyecto asignado" en lib/reports/report-folders.ts) en vez de
+  // fallar la generación del informe por esto.
+  let resolvedProjectId: string | null = null;
+  if (payload.linkedProjectIdRaw) {
+    const { data: linkedProject } = await supabase
+      .from('projects')
+      .select('id')
+      .eq('id', payload.linkedProjectIdRaw)
+      .eq('company_id', tenant.companyId)
+      .maybeSingle();
+    resolvedProjectId = linkedProject?.id ?? null;
+  }
 
   const companyName = companySettings?.company_name || tenant.companyName;
   const timestamp = new Date().toISOString();
@@ -290,11 +319,12 @@ async function buildTechnicalReportPdf(
     clientSignatureRole: payload.clientSignatureRole,
     clientSignatureDate: payload.clientSignatureDate,
     maintenanceId: payload.maintenanceId,
+    linkedProjectId: resolvedProjectId ?? '',
   };
 
   return {
     success: true,
-    data: { payload, formFieldsForEdit, evidenceItems, pdfBuffer, companyName, companySettings: companySettings ?? null },
+    data: { payload, formFieldsForEdit, evidenceItems, pdfBuffer, companyName, companySettings: companySettings ?? null, resolvedProjectId },
   };
 }
 
@@ -340,7 +370,7 @@ export async function generateTechnicalReport(formData: FormData) {
 
     const built = await buildTechnicalReportPdf(formData, tenant, supabase);
     if (!built.success) return built;
-    const { payload, formFieldsForEdit, evidenceItems, pdfBuffer, companyName, companySettings } = built.data;
+    const { payload, formFieldsForEdit, evidenceItems, pdfBuffer, companyName, companySettings, resolvedProjectId } = built.data;
 
     const timestamp = new Date().toISOString();
     const fileName = `INFORME_TECNICO_${timestamp.slice(0, 10)}_${Date.now()}.pdf`;
@@ -420,6 +450,12 @@ export async function generateTechnicalReport(formData: FormData) {
       record_count: 1,
       row_count: 1,
       file_path: uploadPath,
+      // Vínculo real a projects.id, ya validado contra tenant.companyId en
+      // buildTechnicalReportPdf - nunca el projectName de texto libre
+      // guardado arriba en report_metadata. null si no se seleccionó
+      // proyecto o si el valor recibido no pertenecía a esta empresa (ver
+      // "Sin proyecto asignado" en lib/reports/report-folders.ts).
+      project_id: resolvedProjectId,
       generated_by: tenant.userId,
       status: 'GENERATING',
       filters: { maintenanceId: payload.maintenanceId, clientName: payload.clientName },
@@ -635,7 +671,7 @@ export async function updateTechnicalReport(reportId: string, formData: FormData
 
     const built = await buildTechnicalReportPdf(formData, tenant, supabase);
     if (!built.success) return built;
-    const { payload, formFieldsForEdit, evidenceItems, pdfBuffer } = built.data;
+    const { payload, formFieldsForEdit, evidenceItems, pdfBuffer, resolvedProjectId } = built.data;
 
     const timestamp = new Date().toISOString();
     const fileName = `INFORME_TECNICO_${timestamp.slice(0, 10)}_${Date.now()}.pdf`;
@@ -683,6 +719,9 @@ export async function updateTechnicalReport(reportId: string, formData: FormData
         report_metadata: reportMetadata,
         evidence_items: evidenceItems,
         signatures,
+        // Igual que en generateTechnicalReport: ya validado contra
+        // tenant.companyId, nunca el valor crudo del formulario.
+        project_id: resolvedProjectId,
         filters: { maintenanceId: payload.maintenanceId, clientName: payload.clientName },
         filters_applied: { maintenanceId: payload.maintenanceId, clientName: payload.clientName },
       })

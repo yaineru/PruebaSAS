@@ -36,6 +36,11 @@ type MaintenanceOption = {
   maintenance_date?: string | null;
 };
 
+type ProjectOption = {
+  id: string;
+  name: string;
+};
+
 type EvidenceType = "BEFORE" | "AFTER" | "EVIDENCE";
 
 type EvidencePhoto = {
@@ -77,6 +82,11 @@ const TEXT_FIELD_NAMES = [
   "procedure",
   "sparePartsUsed",
   "observations",
+  // Vínculo opcional a un proyecto real (projects.id) - distinto de
+  // projectName (texto libre, de siempre). Se usa SOLO para clasificar el
+  // informe en la vista de carpetas (lib/reports/report-folders.ts);
+  // nunca sustituye ni se muestra en el PDF en lugar de "Proyecto / Obra".
+  "linkedProjectId",
 ] as const;
 
 const SIGNATURE_FIELD_NAMES = [
@@ -261,6 +271,7 @@ const emptyFormState: Record<string, string> = {
   procedure: "",
   sparePartsUsed: "",
   observations: "",
+  linkedProjectId: "",
 };
 
 export function TechnicalReportForm({ companyId, editReportId }: Props) {
@@ -268,6 +279,7 @@ export function TechnicalReportForm({ companyId, editReportId }: Props) {
   const router = useRouter();
   const [maintenances, setMaintenances] = useState<MaintenanceOption[]>([]);
   const [selectedMaintenanceId, setSelectedMaintenanceId] = useState("");
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -337,6 +349,30 @@ export function TechnicalReportForm({ companyId, editReportId }: Props) {
     };
 
     loadMaintenances();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
+  // Catálogo de proyectos reales (projects.id) para el vínculo opcional que
+  // alimenta la vista de carpetas - RLS (projects_select, is_company_member())
+  // ya garantiza que esta consulta solo devuelve proyectos de esta empresa,
+  // igual que loadMaintenances arriba.
+  useEffect(() => {
+    const loadProjects = async () => {
+      try {
+        const { data } = await supabase
+          .from("projects")
+          .select("id, name")
+          .eq("company_id", companyId)
+          .order("name", { ascending: true })
+          .limit(200);
+        if (data) setProjects(data as ProjectOption[]);
+      } catch {
+        // Sin conexión o error de red: el selector de proyecto queda vacío -
+        // vincular un proyecto es opcional, así que esto nunca bloquea el
+        // resto del formulario.
+      }
+    };
+    loadProjects();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId]);
 
@@ -556,6 +592,11 @@ export function TechnicalReportForm({ companyId, editReportId }: Props) {
         activityType: result.maintenance.type || prev.activityType,
         problemDescription: result.maintenance.description || prev.problemDescription,
         observations: result.maintenance.observations || prev.observations,
+        // El mantenimiento asociado ya tiene un project_id real (FK, no
+        // texto libre) - reutilizarlo evita que el usuario tenga que
+        // seleccionar el mismo proyecto dos veces, y es la única fuente
+        // automática de este campo que no es una decisión del usuario.
+        linkedProjectId: result.maintenance.projectId || prev.linkedProjectId,
       }));
       // El mantenimiento seleccionado puede traer su propio Antes/Después
       // (maintenance_records.evidence_before_url/after_url, un campo previo
@@ -858,6 +899,26 @@ export function TechnicalReportForm({ companyId, editReportId }: Props) {
                   <Label htmlFor="projectLocation">Ubicación / Sede</Label>
                   <Input id="projectLocation" name="projectLocation" value={formState.projectLocation} onChange={(e) => setFormState((prev) => ({ ...prev, projectLocation: e.target.value }))} />
                 </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="linkedProjectId">Vincular a proyecto del catálogo (opcional)</Label>
+                <select
+                  id="linkedProjectId"
+                  name="linkedProjectId"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={formState.linkedProjectId}
+                  onChange={(e) => setFormState((prev) => ({ ...prev, linkedProjectId: e.target.value }))}
+                >
+                  <option value="">Sin vincular (queda como &quot;Sin proyecto asignado&quot;)</option>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  Solo organiza el informe en la vista de carpetas - no reemplaza el campo &quot;Proyecto / Obra&quot; de arriba, que sigue imprimiéndose en el PDF tal como lo escribas.
+                </p>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">

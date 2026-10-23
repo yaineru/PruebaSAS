@@ -3,7 +3,9 @@ import { getTenantContext } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ReportList } from "@/components/report-list";
+import { ReportFolders } from "@/components/report-folders";
 import { FileJson } from "lucide-react";
 
 export const metadata = {
@@ -38,7 +40,18 @@ export default async function ReportsPage() {
           )}
         </div>
 
-        <ReportList companyId={tenant.companyId} />
+        <Tabs defaultValue="carpetas" className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="carpetas">Carpetas</TabsTrigger>
+            <TabsTrigger value="lista">Lista</TabsTrigger>
+          </TabsList>
+          <TabsContent value="carpetas">
+            <ReportFolders companyId={tenant.companyId} />
+          </TabsContent>
+          <TabsContent value="lista">
+            <ReportList companyId={tenant.companyId} />
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );

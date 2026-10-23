@@ -39,6 +39,10 @@ export type GeneratedReport = {
   // (ver lib/actions/technical-reports.ts) - components/report-list.tsx lo
   // usa para decidir si mostrar ese botón.
   reportMetadata?: Record<string, unknown>;
+  // Vínculo real a projects.id (generated_reports.project_id, migración 045)
+  // - null si no se vinculó o si el informe es anterior a esa columna. Ver
+  // lib/reports/report-folders.ts para cómo se usa en la vista de carpetas.
+  projectId?: string | null;
 };
 
 export type ReportFilters = {

@@ -59,6 +59,8 @@ function makeReport(overrides: Partial<FolderReportInput>): FolderReportInput {
     createdAt: overrides.createdAt ?? "2026-06-01T12:00:00.000Z",
     projectId: overrides.projectId ?? null,
     reportDate: overrides.reportDate ?? null,
+    folderYear: overrides.folderYear ?? null,
+    folderMonth: overrides.folderMonth ?? null,
   };
 }
 
@@ -94,6 +96,30 @@ describe("classifyReport", () => {
   it("exportación general siempre usa created_at (es el único dato de fecha que tiene)", () => {
     const result = classifyReport(makeReport({ reportType: "MAINTENANCE", createdAt: "2026-05-01T12:00:00.000Z" }));
     expect(result.bucket).toEqual({ year: 2026, month: 5 });
+  });
+
+  it("reclasificación manual (folderYear/folderMonth) gana sobre reportDate para un informe técnico", () => {
+    const result = classifyReport(
+      makeReport({ reportDate: "2026-01-05", folderYear: 2026, folderMonth: 9, projectId: "p1" })
+    );
+    expect(result.bucket).toEqual({ year: 2026, month: 9 });
+    // La categoría (a qué proyecto pertenece) no cambia por mover de carpeta.
+    expect(result.category).toBe("project");
+  });
+
+  it("reclasificación manual gana sobre created_at para una exportación general", () => {
+    const result = classifyReport(
+      makeReport({ reportType: "ASSETS", createdAt: "2026-05-01T12:00:00.000Z", folderYear: 2025, folderMonth: 12 })
+    );
+    expect(result.bucket).toEqual({ year: 2025, month: 12 });
+    expect(result.category).toBe("general");
+  });
+
+  it("solo folderYear o solo folderMonth (no ambos) se ignora - evita un bucket a medias", () => {
+    const onlyYear = classifyReport(makeReport({ folderYear: 2026, folderMonth: null, reportDate: "2026-03-10" }));
+    expect(onlyYear.bucket).toEqual({ year: 2026, month: 3 }); // cae a reportDate, no a un mes inventado
+    const onlyMonth = classifyReport(makeReport({ folderYear: null, folderMonth: 9, reportDate: "2026-03-10" }));
+    expect(onlyMonth.bucket).toEqual({ year: 2026, month: 3 });
   });
 });
 

@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronRight, Download, Folder, FolderOpen, Loader, Mail, Pencil } from "lucide-react";
+import { ChevronRight, Download, Folder, FolderOpen, FolderInput, Loader, Mail, Pencil } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SendReportEmailModal } from "@/components/send-report-email-modal";
+import { MoveReportFolderModal } from "@/components/move-report-folder-modal";
 import { formatDate } from "@/lib/utils";
 import { REPORT_ENTITY_LABELS } from "@/lib/reports/entity-labels";
 import { MONTH_NAMES_ES } from "@/lib/reports/report-folders";
@@ -52,7 +53,16 @@ export function ReportFolders({ companyId }: Props) {
   const [loading, setLoading] = useState(true);
   const [crumb, setCrumb] = useState<Crumb>({ level: "root" });
   const [emailingReportId, setEmailingReportId] = useState<string | null>(null);
+  const [movingReport, setMovingReport] = useState<SerializedReportEntry | null>(null);
   const [busyReportId, setBusyReportId] = useState<string | null>(null);
+
+  const loadFolders = () => {
+    setLoading(true);
+    getReportFolders().then((result) => {
+      setData(result);
+      setLoading(false);
+    });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -123,7 +133,7 @@ export function ReportFolders({ companyId }: Props) {
     );
   }
 
-  const { projects, unassignedTechnical, general, totalCount } = data.data;
+  const { projects, unassignedTechnical, general, totalCount, availableProjects, canMove } = data.data;
 
   const findGroup = (key: "unassigned" | "general") => (key === "unassigned" ? unassignedTechnical : general);
 
@@ -213,6 +223,12 @@ export function ReportFolders({ companyId }: Props) {
             <Button size="sm" variant="outline" onClick={() => router.push(`/informes-tecnicos?editId=${report.id}`)}>
               <Pencil className="mr-2 h-4 w-4" />
               Corregir
+            </Button>
+          )}
+          {canMove && (
+            <Button size="sm" variant="outline" onClick={() => setMovingReport(report)}>
+              <FolderInput className="mr-2 h-4 w-4" />
+              Mover a carpeta
             </Button>
           )}
         </div>
@@ -412,6 +428,22 @@ export function ReportFolders({ companyId }: Props) {
             monthBucket?.reports.find((r) => r.id === emailingReportId)?.reportType ?? "TECHNICAL_REPORT"
           )}
           onClose={() => setEmailingReportId(null)}
+        />
+      )}
+      {movingReport && (
+        <MoveReportFolderModal
+          report={movingReport}
+          availableProjects={availableProjects}
+          onClose={() => setMovingReport(null)}
+          onMoved={() => {
+            setMovingReport(null);
+            // El informe puede haber cambiado de proyecto y/o de año/mes -
+            // la vista en la que estábamos parados puede ya no contenerlo,
+            // así que se vuelve a la raíz en vez de mostrar una carpeta que
+            // podría quedar vacía o con el conteo desactualizado.
+            setCrumb({ level: "root" });
+            loadFolders();
+          }}
         />
       )}
     </Card>

@@ -62,6 +62,13 @@ export type FolderReportInput = {
   // Para TECHNICAL_REPORT: report_metadata.formPayload.reportDate (fecha de
   // ejecución/del informe, ya existente en el modelo - NO created_at).
   reportDate: string | null;
+  // Reclasificación manual (generated_reports.folder_year/folder_month,
+  // migración 046) - cuando ambos están presentes, GANAN sobre reportDate/
+  // created_at para decidir año y mes, sin tocar la fecha real del informe
+  // ni su contenido. Nunca afecta la categoría (project/unassigned/general),
+  // solo en qué Año/Mes aparece dentro de esa categoría.
+  folderYear: number | null;
+  folderMonth: number | null;
 };
 
 export type FolderCategory = "project" | "unassigned_technical" | "general";
@@ -88,15 +95,20 @@ export type ClassifiedReport = FolderReportInput & {
  * comportamiento previo, solo lo usa también para agrupar.
  */
 export function classifyReport(report: FolderReportInput): ClassifiedReport {
+  const manualBucket: YearMonth | null =
+    report.folderYear != null && report.folderMonth != null
+      ? { year: report.folderYear, month: report.folderMonth }
+      : null;
+
   if (report.reportType === "TECHNICAL_REPORT") {
-    const bucket = yearMonthFromDateOnly(report.reportDate) ?? yearMonthFromTimestamp(report.createdAt);
+    const bucket = manualBucket ?? yearMonthFromDateOnly(report.reportDate) ?? yearMonthFromTimestamp(report.createdAt);
     return {
       ...report,
       category: report.projectId ? "project" : "unassigned_technical",
       bucket,
     };
   }
-  return { ...report, category: "general", bucket: yearMonthFromTimestamp(report.createdAt) };
+  return { ...report, category: "general", bucket: manualBucket ?? yearMonthFromTimestamp(report.createdAt) };
 }
 
 export type ProjectFolder = {

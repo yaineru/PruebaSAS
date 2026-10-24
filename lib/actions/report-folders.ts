@@ -19,11 +19,19 @@ export type SerializedReportEntry = {
   // existe "Corregir") - nunca se envía el report_metadata completo al
   // cliente solo para decidir si mostrar un botón.
   canCorrect: boolean;
+  // Estado actual de la reclasificación manual (migración 046), para
+  // prellenar el formulario "Mover a carpeta" con lo que ya tiene el
+  // informe en vez de empezar siempre en blanco.
+  projectId: string | null;
+  folderYear: number | null;
+  folderMonth: number | null;
 };
 
 export type SerializedYearMonth = { year: number; month: number; reports: SerializedReportEntry[] };
 export type SerializedProjectFolder = { projectId: string; projectName: string; count: number; buckets: SerializedYearMonth[] };
 export type SerializedBucketGroup = { count: number; buckets: SerializedYearMonth[] };
+
+export type AvailableProject = { id: string; name: string };
 
 export type ReportFoldersResult =
   | {
@@ -33,6 +41,15 @@ export type ReportFoldersResult =
         unassignedTechnical: SerializedBucketGroup;
         general: SerializedBucketGroup;
         totalCount: number;
+        // TODOS los proyectos de la empresa (no solo los que ya tienen
+        // informes) - el selector de "Mover a carpeta" necesita poder
+        // asignar un informe a un proyecto que todavía no tiene ninguno.
+        availableProjects: AvailableProject[];
+        // El botón "Mover a carpeta" se oculta para roles que no pueden
+        // reclasificar informes - moveReportToFolder vuelve a exigir esto
+        // en el servidor, esto es solo para no mostrar una acción que de
+        // todas formas sería rechazada.
+        canMove: boolean;
       };
     }
   | { success: false; error: string };
@@ -46,6 +63,9 @@ function toEntry(row: {
   file_size_bytes: number | null;
   record_count: number | null;
   report_metadata: unknown;
+  project_id: string | null;
+  folder_year: number | null;
+  folder_month: number | null;
 }): SerializedReportEntry {
   const metadata = (row.report_metadata || {}) as Record<string, unknown>;
   const formPayload = (metadata.formPayload || {}) as Record<string, unknown>;
@@ -59,8 +79,13 @@ function toEntry(row: {
     fileSizeBytes: row.file_size_bytes,
     recordCount: row.record_count ?? 0,
     canCorrect: row.report_type === 'TECHNICAL_REPORT' && Object.keys(formPayload).length > 0,
+    projectId: row.project_id,
+    folderYear: row.folder_year,
+    folderMonth: row.folder_month,
   };
 }
+
+const CAN_MOVE_ROLES = new Set(['ADMIN', 'SUPERVISOR']);
 
 /**
  * Obtiene y clasifica los informes de la empresa actual para la vista de
@@ -87,7 +112,7 @@ export async function getReportFolders(): Promise<ReportFoldersResult> {
 
     const { data: rows, error } = await supabase
       .from('generated_reports')
-      .select('id, report_type, report_format, status, created_at, file_size_bytes, record_count, project_id, report_metadata')
+      .select('id, report_type, report_format, status, created_at, file_size_bytes, record_count, project_id, report_metadata, folder_year, folder_month')
       .eq('company_id', tenant.companyId)
       .order('created_at', { ascending: false });
 
@@ -135,6 +160,8 @@ export async function getReportFolders(): Promise<ReportFoldersResult> {
         // nombre verificado.
         projectId: row.project_id && projectNames.has(row.project_id as string) ? (row.project_id as string) : null,
         reportDate,
+        folderYear: row.folder_year as number | null,
+        folderMonth: row.folder_month as number | null,
       };
     });
 
@@ -173,6 +200,16 @@ export async function getReportFolders(): Promise<ReportFoldersResult> {
       return result;
     };
 
+    // Todos los proyectos de la empresa, no solo los que ya aparecen en el
+    // árbol - el selector de "Mover a carpeta" debe poder asignar un informe
+    // a un proyecto que todavía no tiene ningún informe.
+    const { data: allProjects, error: allProjectsError } = await supabase
+      .from('projects')
+      .select('id, name')
+      .eq('company_id', tenant.companyId)
+      .order('name', { ascending: true });
+    if (allProjectsError) console.error('GET_REPORT_FOLDERS_ALL_PROJECTS_ERROR', allProjectsError);
+
     return {
       success: true,
       data: {
@@ -191,10 +228,109 @@ export async function getReportFolders(): Promise<ReportFoldersResult> {
           buckets: serializeYears(tree.general.years),
         },
         totalCount: tree.totalCount,
+        availableProjects: (allProjects ?? []) as AvailableProject[],
+        canMove: CAN_MOVE_ROLES.has(tenant.role),
       },
     };
   } catch (error) {
     console.error('GET_REPORT_FOLDERS_UNEXPECTED_ERROR', error);
     return { success: false, error: 'No fue posible cargar los informes.' };
+  }
+}
+
+export type MoveReportToFolderInput = {
+  reportId: string;
+  // Reemplaza el estado completo (no es un patch parcial) - el formulario
+  // siempre envía los tres campos con el valor que deben quedar, prellenado
+  // con lo que el informe ya tenía (ver SerializedReportEntry.projectId/
+  // folderYear/folderMonth) para que cambiar uno no borre el otro por
+  // accidente. null en projectId = "sin proyecto"; null en year Y month
+  // juntos = "usar la fecha automática del informe" (reportDate/created_at).
+  projectId: string | null;
+  year: number | null;
+  month: number | null;
+};
+
+/**
+ * Reclasifica manualmente un informe ya generado: a qué proyecto pertenece
+ * y/o en qué carpeta Año/Mes aparece - sin tocar su fecha real
+ * (formPayload.reportDate), created_at, ni el archivo PDF. Pensado para los
+ * informes "sueltos" (sin proyecto, o cuya fecha de ejecución no refleja
+ * bien dónde deberían archivarse) que Progrúas ya tenía creados antes de
+ * esta función.
+ *
+ * Mismo patrón de validación que buildTechnicalReportPdf en
+ * lib/actions/technical-reports.ts: el reportId se verifica contra
+ * tenant.companyId antes de tocarlo, y un projectId recibido se valida
+ * contra esa misma empresa antes de guardarse - nunca se confía en que el
+ * valor que llegó del cliente ya sea válido.
+ */
+export async function moveReportToFolder(
+  input: MoveReportToFolderInput
+): Promise<{ success: true } | { success: false; error: string }> {
+  try {
+    await assertSameOrigin();
+    await assertRateLimit('moveReportToFolder', 30);
+
+    const tenant = await getTenantContext();
+    if (!CAN_MOVE_ROLES.has(tenant.role)) {
+      return { success: false, error: 'No tienes permisos para reclasificar informes.' };
+    }
+
+    if ((input.year == null) !== (input.month == null)) {
+      return { success: false, error: 'Indica año y mes juntos, o ninguno de los dos.' };
+    }
+    if (input.month != null && (input.month < 1 || input.month > 12)) {
+      return { success: false, error: 'El mes debe estar entre 1 y 12.' };
+    }
+    if (input.year != null && (input.year < 2000 || input.year > 2100)) {
+      return { success: false, error: 'Año fuera de rango.' };
+    }
+
+    const supabase = await createClient();
+
+    const { data: existing, error: fetchError } = await supabase
+      .from('generated_reports')
+      .select('id')
+      .eq('id', input.reportId)
+      .eq('company_id', tenant.companyId)
+      .maybeSingle();
+    if (fetchError || !existing) {
+      return { success: false, error: 'No se encontró el informe.' };
+    }
+
+    let resolvedProjectId: string | null = null;
+    if (input.projectId) {
+      const { data: project } = await supabase
+        .from('projects')
+        .select('id')
+        .eq('id', input.projectId)
+        .eq('company_id', tenant.companyId)
+        .maybeSingle();
+      if (!project) {
+        return { success: false, error: 'El proyecto seleccionado no existe o no pertenece a tu empresa.' };
+      }
+      resolvedProjectId = project.id;
+    }
+
+    const { error: updateError } = await supabase
+      .from('generated_reports')
+      .update({
+        project_id: resolvedProjectId,
+        folder_year: input.year,
+        folder_month: input.month,
+      })
+      .eq('id', input.reportId)
+      .eq('company_id', tenant.companyId);
+
+    if (updateError) {
+      console.error('MOVE_REPORT_TO_FOLDER_ERROR', updateError);
+      return { success: false, error: 'No fue posible mover el informe.' };
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('MOVE_REPORT_TO_FOLDER_UNEXPECTED_ERROR', error);
+    return { success: false, error: 'No fue posible mover el informe.' };
   }
 }

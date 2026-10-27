@@ -19,6 +19,7 @@ import { Loader, FileText, CheckCircle, AlertCircle, ImageIcon, Plus, Trash2, Cl
 import { useConnectivity } from "@/lib/offline/connectivity";
 import { useOffline } from "@/components/offline-provider";
 import { getOfflineDb, type QueueFile } from "@/lib/offline/db";
+import { hasPendingEvidenceUploads, selectEvidencePhotosToSubmit } from "@/lib/reports/technical-evidence";
 
 type Props = {
   companyId: string;
@@ -51,6 +52,15 @@ type EvidencePhoto = {
   // Solo cuando la foto se guardó sin conexión: identifica el Blob en la
   // tabla `files` de Dexie (todavía no tiene URL real, se sube al sincronizar).
   pendingLocal?: boolean;
+  // true mientras EvidencePicker está subiendo este archivo (en línea) o
+  // comprimiéndolo para guardarlo sin conexión - ver hasPendingEvidenceUploads
+  // en lib/reports/technical-evidence.ts: mientras esto sea true en
+  // CUALQUIER foto, el envío del formulario se bloquea. Antes de esto, la
+  // vista previa (un blob: URL local e instantáneo) aparecía en pantalla
+  // mucho antes de que `url` tuviera el valor real subido, y nada impedía
+  // guardar el informe en ese hueco - la foto se veía en la pantalla pero
+  // nunca llegaba a formar parte del informe guardado.
+  uploading?: boolean;
 };
 
 const EVIDENCE_TYPE_LABELS: Record<EvidenceType, string> = {
@@ -140,13 +150,23 @@ function EvidencePicker({
   offline,
   onUploaded,
   onLocalFile,
+  onUploadStateChange,
 }: {
   label: string;
   companyId: string;
   initialUrl: string;
   offline: boolean;
   onUploaded: (url: string) => void;
-  onLocalFile: (file: File) => void;
+  // Puede devolver una promesa (handleLocalFile en el padre escribe en
+  // IndexedDB de forma asíncrona) - se espera antes de avisar que la subida
+  // terminó, para que "uploading" nunca pase a false mientras el padre
+  // todavía está guardando el archivo.
+  onLocalFile: (file: File) => void | Promise<void>;
+  // El padre necesita saber que ESTA foto sigue subiendo, no solo el
+  // resultado final - ver EvidencePhoto.uploading. Se llama con true al
+  // empezar y con false en cualquier desenlace (éxito o error), para que el
+  // formulario nunca quede bloqueado por una subida que ya terminó mal.
+  onUploadStateChange: (uploading: boolean) => void;
 }) {
   const [preview, setPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -188,16 +208,19 @@ function EvidencePicker({
 
     if (offline) {
       setUploading(true);
+      onUploadStateChange(true);
       try {
         const compressed = await compressImageForUpload(file);
-        onLocalFile(compressed);
+        await onLocalFile(compressed);
       } finally {
         setUploading(false);
+        onUploadStateChange(false);
       }
       return;
     }
 
     setUploading(true);
+    onUploadStateChange(true);
     try {
       const uploadFile = await compressImageForUpload(file);
       const ext = uploadFile.type === "image/png" ? "png" : uploadFile.type === "image/webp" ? "webp" : "jpg";
@@ -216,6 +239,7 @@ function EvidencePicker({
       setPreview(null);
     } finally {
       setUploading(false);
+      onUploadStateChange(false);
     }
   };
 
@@ -658,7 +682,9 @@ export function TechnicalReportForm({ companyId, editReportId }: Props) {
       createdAt: Date.now(),
     });
     const objectUrl = URL.createObjectURL(file);
-    setEvidencePhotos((prev) => prev.map((photo) => (photo.clientId === clientId ? { ...photo, pendingLocal: true, url: objectUrl } : photo)));
+    setEvidencePhotos((prev) =>
+      prev.map((photo) => (photo.clientId === clientId ? { ...photo, pendingLocal: true, url: objectUrl, uploading: false } : photo))
+    );
   };
 
   const clearDraft = async () => {
@@ -669,9 +695,21 @@ export function TechnicalReportForm({ companyId, editReportId }: Props) {
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setIsLoading(true);
     setError(null);
     setMessage(null);
+
+    // Defensa en profundidad además de disabled={...anyPhotoUploading} en el
+    // botón: aunque algo lograra disparar el submit del <form> sin pasar por
+    // el botón (ej. Enter en un campo), nunca debe guardarse un informe
+    // mientras una foto sigue subiendo - exactamente la causa raíz
+    // confirmada de "las fotos desaparecen después de guardar" (ver
+    // lib/reports/technical-evidence.ts).
+    if (hasPendingEvidenceUploads(evidencePhotos)) {
+      setError("Espera a que terminen de subirse las fotos antes de generar el informe.");
+      return;
+    }
+
+    setIsLoading(true);
 
     const formData = new FormData(event.currentTarget);
     Object.entries(formState).forEach(([key, value]) => {
@@ -681,7 +719,7 @@ export function TechnicalReportForm({ companyId, editReportId }: Props) {
     // Solo las fotos que realmente tienen una imagen (subida o guardada
     // localmente) viajan - una fila agregada y luego dejada vacía no debe
     // generar un item de evidencia sin imagen.
-    const photosToSubmit = evidencePhotos.filter((photo) => photo.url || photo.pendingLocal);
+    const photosToSubmit = selectEvidencePhotosToSubmit(evidencePhotos);
     formData.set("evidenceCount", String(photosToSubmit.length));
     photosToSubmit.forEach((photo, index) => {
       formData.set(`evidenceTitle_${index}`, photo.title);
@@ -774,6 +812,22 @@ export function TechnicalReportForm({ companyId, editReportId }: Props) {
       return;
     }
 
+    // CAUSA RAÍZ confirmada de "aparecen datos de un cliente anterior":
+    // generateTechnicalReport ya soporta client_op_id para deduplicar (lo usa
+    // la sincronización sin conexión, ver lib/offline/sync.ts), pero el envío
+    // EN LÍNEA nunca lo enviaba. Con conexión inestable, la petición puede
+    // llegar al servidor y completarse ahí (el informe queda creado) pero la
+    // respuesta se pierde en el camino de vuelta - el navegador ve un error
+    // de red, clearDraft() nunca se ejecuta (está más abajo, solo en la rama
+    // de éxito) y el borrador local con los datos de ESE cliente ya
+    // entregado queda vivo para la próxima vez que se abra el formulario,
+    // apareciendo como si fuera un cliente nuevo. Reusar draftIdRef.current
+    // (el mismo id estable que ya identifica este borrador) como
+    // client_op_id hace que un reintento - automático o manual - reconozca
+    // que el informe ya existe y devuelva ese mismo registro en vez de
+    // crear un duplicado, y esa respuesta exitosa sí limpia el borrador.
+    formData.set("client_op_id", draftIdRef.current);
+
     try {
       const result = await generateTechnicalReport(formData);
       if (result.success) {
@@ -810,6 +864,8 @@ export function TechnicalReportForm({ companyId, editReportId }: Props) {
       </div>
     );
   }
+
+  const anyPhotoUploading = hasPendingEvidenceUploads(evidencePhotos);
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
@@ -1059,8 +1115,9 @@ export function TechnicalReportForm({ companyId, editReportId }: Props) {
                     companyId={companyId}
                     initialUrl={photo.url}
                     offline={!isOnline}
-                    onUploaded={(url) => updateEvidencePhoto(index, { url, pendingLocal: false })}
-                    onLocalFile={(file) => void handleLocalFile(photo.clientId, file)}
+                    onUploaded={(url) => updateEvidencePhoto(index, { url, pendingLocal: false, uploading: false })}
+                    onLocalFile={(file) => handleLocalFile(photo.clientId, file)}
+                    onUploadStateChange={(uploading) => updateEvidencePhoto(index, { uploading })}
                   />
                 </div>
               ))}
@@ -1108,7 +1165,14 @@ export function TechnicalReportForm({ companyId, editReportId }: Props) {
               </div>
             ) : null}
 
-            <Button type="submit" disabled={isLoading || (isEditMode && !isOnline)} className="w-full">
+            {anyPhotoUploading ? (
+              <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                <Loader className="h-4 w-4 animate-spin" />
+                <span>Espera a que terminen de subirse las fotos antes de generar el informe.</span>
+              </div>
+            ) : null}
+
+            <Button type="submit" disabled={isLoading || anyPhotoUploading || (isEditMode && !isOnline)} className="w-full">
               {isLoading ? (
                 <>
                   <Loader className="mr-2 h-4 w-4 animate-spin" /> Guardando...

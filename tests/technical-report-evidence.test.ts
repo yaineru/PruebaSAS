@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { normalizeEvidenceItems } from "@/lib/reports/technical-evidence";
+import {
+  hasPendingEvidenceUploads,
+  normalizeEvidenceItems,
+  selectEvidencePhotosToSubmit,
+  type EvidencePhotoSubmissionState,
+} from "@/lib/reports/technical-evidence";
 
 // Caso real reportado por una usuaria de Progrúas: muchos trabajos no tienen
 // un "antes" y "después" como tal, solo varias fotos de evidencia (del
@@ -75,5 +80,74 @@ describe("normalizeEvidenceItems", () => {
 
   it("un item sin ninguna URL se descarta silenciosamente", () => {
     expect(normalizeEvidenceItems([{ title: "vacío" }])).toEqual([]);
+  });
+});
+
+// Incidencia real de Progrúas: fotos adjuntadas con conexión inestable
+// "desaparecían" después de guardar. Causa raíz confirmada en
+// components/technical-report-form.tsx: EvidencePicker sube cada foto de
+// forma asíncrona y solo avisa al formulario padre cuando la subida
+// TERMINA - mientras tanto la vista previa (un blob: URL local) ya se
+// mostraba en pantalla con el campo `url` real todavía vacío. Si el envío
+// ocurría en esa ventana, el filtro que decide qué fotos viajan las excluía
+// sin avisar. Estas pruebas cubren la regla que ahora bloquea ese envío.
+describe("hasPendingEvidenceUploads (bloquea el envío mientras una foto sigue subiendo)", () => {
+  it("ninguna foto subiendo -> false, el envío puede continuar", () => {
+    const photos: EvidencePhotoSubmissionState[] = [
+      { url: "https://x/1.jpg" },
+      { url: "https://x/2.jpg" },
+    ];
+    expect(hasPendingEvidenceUploads(photos)).toBe(false);
+  });
+
+  it("una sola foto todavía subiendo (url vacía, uploading=true) -> true, bloquea el envío", () => {
+    const photos: EvidencePhotoSubmissionState[] = [
+      { url: "https://x/1.jpg", uploading: false },
+      { url: "", uploading: true },
+    ];
+    expect(hasPendingEvidenceUploads(photos)).toBe(true);
+  });
+
+  it("varias fotos, solo una subiendo -> sigue bloqueando (basta con una)", () => {
+    const photos: EvidencePhotoSubmissionState[] = [
+      { url: "https://x/1.jpg", uploading: false },
+      { url: "https://x/2.jpg", uploading: false },
+      { url: "", uploading: true },
+    ];
+    expect(hasPendingEvidenceUploads(photos)).toBe(true);
+  });
+
+  it("subida terminada en error (uploading vuelve a false, url queda vacía) ya no bloquea - la fila simplemente no viaja", () => {
+    const photos: EvidencePhotoSubmissionState[] = [{ url: "", uploading: false }];
+    expect(hasPendingEvidenceUploads(photos)).toBe(false);
+  });
+
+  it("foto pendiente de subir sin conexión (pendingLocal) pero ya terminó de guardarse localmente -> no bloquea", () => {
+    const photos: EvidencePhotoSubmissionState[] = [{ url: "blob:local", pendingLocal: true, uploading: false }];
+    expect(hasPendingEvidenceUploads(photos)).toBe(false);
+  });
+
+  it("sin fotos -> false", () => {
+    expect(hasPendingEvidenceUploads([])).toBe(false);
+  });
+});
+
+describe("selectEvidencePhotosToSubmit", () => {
+  it("incluye fotos con url real y fotos pendientes sin conexión (pendingLocal)", () => {
+    const photos: EvidencePhotoSubmissionState[] = [
+      { url: "https://x/1.jpg" },
+      { url: "blob:local", pendingLocal: true },
+    ];
+    expect(selectEvidencePhotosToSubmit(photos)).toHaveLength(2);
+  });
+
+  it("excluye una fila agregada pero nunca completada (sin url ni pendingLocal)", () => {
+    const photos: EvidencePhotoSubmissionState[] = [{ url: "" }, { url: "https://x/1.jpg" }];
+    expect(selectEvidencePhotosToSubmit(photos)).toEqual([{ url: "https://x/1.jpg" }]);
+  });
+
+  it("conserva el resto de los campos de cada foto (no solo url)", () => {
+    const photos = [{ url: "https://x/1.jpg", title: "Panel eléctrico", type: "EVIDENCE" as const }];
+    expect(selectEvidencePhotosToSubmit(photos)).toEqual(photos);
   });
 });

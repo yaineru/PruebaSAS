@@ -2,6 +2,7 @@
 
 import { getOfflineDb, LEGACY_CRUD_TABLE, type QueueFile, type QueueOperation } from "@/lib/offline/db";
 import { createTenantRecord, deleteTenantRecord, updateTenantRecord } from "@/lib/actions/tenant-records";
+import { createAssetHistoryEntry } from "@/lib/actions/asset-history";
 import { generateTechnicalReport } from "@/lib/actions/technical-reports";
 import { generateReport, sendReportByEmail } from "@/lib/actions/reports";
 import { createClient } from "@/lib/supabase/browser";
@@ -193,7 +194,37 @@ async function syncSendReportEmailOperation(operation: QueueOperation): Promise<
   }
 }
 
+// Entrada del historial de un equipo anotada sin conexión. No lleva archivos
+// (es solo texto y números), así que a diferencia de documentos e informes
+// técnicos no hay nada que subir primero: se reconstruye el FormData tal cual
+// lo armó el formulario y se llama a la misma Server Action que usa el flujo
+// online, con el client_op_id para que un reintento tras una respuesta
+// perdida no duplique la entrada (ver migración 048).
+async function syncAssetHistoryOperation(operation: QueueOperation): Promise<SyncResult> {
+  try {
+    const formData = new FormData();
+    for (const [key, value] of Object.entries(operation.payload)) {
+      if (key.startsWith("__")) continue;
+      if (value === null || value === undefined) continue;
+      formData.set(key, String(value));
+    }
+    formData.set("client_op_id", operation.id);
+
+    const result = await createAssetHistoryEntry({ success: false }, formData);
+    if (result.success) return { success: true };
+    return { success: false, error: result.error || "No se pudo guardar la entrada del historial." };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Error de red al sincronizar el historial."
+    };
+  }
+}
+
 async function syncOneOperation(scopeKey: string, operation: QueueOperation): Promise<SyncResult> {
+  if (operation.type === "CREATE_ASSET_HISTORY") {
+    return syncAssetHistoryOperation(operation);
+  }
   if (operation.type === "CREATE_DOCUMENT") {
     return syncDocumentOperation(scopeKey, operation);
   }

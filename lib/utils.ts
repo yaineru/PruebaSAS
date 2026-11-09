@@ -62,6 +62,28 @@ export function formatDateOnly(value?: string | Date | null) {
   }).format(date);
 }
 
+// Orden cronológico del historial del equipo. Acepta tanto "YYYY-MM-DD"
+// (columnas `date`, como performed_at o maintenance_date) como un ISO
+// completo (`timestamptz`, como reported_at o created_at). Una fecha sin hora
+// se ancla al día de calendario por sus partes, igual que formatDate(), para
+// que no se corra un día en zonas detrás de UTC y el orden coincida con la
+// fecha que se muestra.
+//
+// Vive acá, y no junto al timeline, porque lo usan los dos lados: el servidor
+// arma la lista que llega ya ordenada (app/(app)/activos/[id]/page.tsx) y el
+// cliente reordena al intercalar las entradas que todavía están en la cola
+// offline. Si cada lado tuviera su propia versión, una entrada pendiente
+// podría colocarse en un punto distinto del que ocupará al sincronizar.
+export function timelineTimestamp(value?: string | null): number {
+  if (!value) return 0;
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  const date = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : new Date(value);
+  const time = date.getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
 export function formatTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";

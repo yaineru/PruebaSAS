@@ -3,19 +3,27 @@
 import Link from "next/link";
 import { useActionState, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { useLiveQuery } from "dexie-react-hooks";
 import {
+  AlertCircle,
   CalendarCheck,
+  CloudOff,
   FileText,
   History,
   Plus,
+  RefreshCw,
   Siren,
   Trash2,
   Wrench,
   X
 } from "lucide-react";
 import { createAssetHistoryEntry, deleteAssetHistoryEntry, type AssetHistoryActionState } from "@/lib/actions/asset-history";
-import { ENUM_OPTIONS } from "@/lib/enums";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { ENUM_OPTIONS, getEnumLabel } from "@/lib/enums";
+import { formatCurrency, formatDate, timelineTimestamp } from "@/lib/utils";
+import { useConnectivity } from "@/lib/offline/connectivity";
+import { useOffline } from "@/components/offline-provider";
+import { getOfflineDb } from "@/lib/offline/db";
+import { discardOperation } from "@/lib/offline/sync";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -44,6 +52,16 @@ export type AssetTimelineItem = {
   hourMeter: number | null;
   projectName: string | null;
   href: string | null;
+  /**
+   * Sólo para entradas que todavía están en la cola offline de este
+   * dispositivo: en qué estado de sincronización van. `undefined` significa
+   * que la entrada ya existe en Supabase (que es el caso de todo lo que llega
+   * desde el servidor).
+   */
+  syncStatus?: "PENDING" | "SYNCING" | "FAILED";
+  /** Id de la operación en la cola - para poder descartarla si quedó FAILED. */
+  queueOperationId?: string;
+  syncError?: string | null;
 };
 
 const SOURCE_META: Record<
@@ -83,7 +101,9 @@ export function AssetHistoryTimeline({ assetId, assetName, items, canAddEntry, c
   const [pendingDelete, setPendingDelete] = useState<AssetTimelineItem | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [offlineWarning, setOfflineWarning] = useState<string | null>(null);
+  const [offlineMessage, setOfflineMessage] = useState<string | null>(null);
+  const { isOnline } = useConnectivity();
+  const { scopeKey, syncNow, isSyncing } = useOffline();
 
   useEffect(() => {
     if (!state.success) return;
@@ -92,17 +112,63 @@ export function AssetHistoryTimeline({ assetId, assetName, items, canAddEntry, c
     router.refresh();
   }, [state.success, router]);
 
+  // Entradas anotadas en este dispositivo que todavía no llegaron a Supabase.
+  // El timeline que arma el servidor sólo trae filas que YA existen allá, así
+  // que sin esto el operario anota el tornillo sin señal y no ve nada: la
+  // ficha se vería exactamente igual que antes de anotarlo. Se intercalan en
+  // la misma línea de tiempo, en el lugar que les corresponde por fecha, y
+  // marcadas con su estado de sincronización.
+  const queuedItems = useLiveQuery(async () => {
+    const db = getOfflineDb(scopeKey);
+    const all = await db.operations.where("type").equals("CREATE_ASSET_HISTORY").toArray();
+    // Las ya sincronizadas se sueltan en cuanto el servidor las devuelve en
+    // `items`; se mantienen unos segundos sólo para que el "Sincronizado" sea
+    // visible y la entrada no parpadee entre las dos fuentes.
+    const cutoff = Date.now() - 15 * 1000;
+    return all
+      .filter((op) => String(op.payload.assetId ?? "") === assetId)
+      .filter((op) => op.status !== "DRAFT")
+      .filter((op) => op.status !== "SYNCED" || op.updatedAt > cutoff)
+      .map<AssetTimelineItem>((op) => ({
+        id: op.id,
+        source: "HISTORY",
+        date: op.payload.performed_at ? String(op.payload.performed_at) : null,
+        title: String(op.payload.title ?? "Entrada sin título"),
+        typeLabel: getEnumLabel("assetHistoryEventType", op.payload.event_type ?? "INTERVENTION"),
+        statusLabel: null,
+        description: op.payload.description ? String(op.payload.description) : null,
+        person: op.payload.performed_by_name ? String(op.payload.performed_by_name) : null,
+        cost: op.payload.cost === undefined ? null : Number(op.payload.cost),
+        hourMeter: op.payload.hour_meter === undefined ? null : Number(op.payload.hour_meter),
+        projectName: null,
+        href: null,
+        syncStatus: op.status === "SYNCED" ? undefined : (op.status as "PENDING" | "SYNCING" | "FAILED"),
+        queueOperationId: op.id,
+        syncError: op.lastError ?? null
+      }));
+  }, [scopeKey, assetId]);
+
+  // Una entrada ya sincronizada llega por las dos vías durante unos segundos
+  // (sigue en la cola local y ya viene del servidor). Se queda la del
+  // servidor, que es la versión real - con su proyecto resuelto y su id de
+  // base de datos, así que se puede eliminar desde acá.
+  const allItems = useMemo(() => {
+    const queued = (queuedItems ?? []).filter((item) => item.syncStatus !== undefined);
+    if (queued.length === 0) return items;
+    return [...queued, ...items].sort((a, b) => timelineTimestamp(b.date) - timelineTimestamp(a.date));
+  }, [items, queuedItems]);
+
   const counts = useMemo(() => {
-    const result = new Map<string, number>([["ALL", items.length]]);
-    for (const item of items) {
+    const result = new Map<string, number>([["ALL", allItems.length]]);
+    for (const item of allItems) {
       result.set(item.source, (result.get(item.source) ?? 0) + 1);
     }
     return result;
-  }, [items]);
+  }, [allItems]);
 
   const visibleItems = useMemo(
-    () => (filter === "ALL" ? items : items.filter((item) => item.source === filter)),
-    [items, filter]
+    () => (filter === "ALL" ? allItems : allItems.filter((item) => item.source === filter)),
+    [allItems, filter]
   );
 
   const today = new Date().toISOString().slice(0, 10);
@@ -121,19 +187,49 @@ export function AssetHistoryTimeline({ assetId, assetName, items, canAddEntry, c
     router.refresh();
   }
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
-    // El historial no tiene soporte offline todavía (a diferencia de
-    // Equipos/Mantenimientos, que pasan por la cola de lib/offline/sync.ts):
-    // se avisa en vez de dejar que la Server Action falle con un error de red
-    // confuso y el usuario crea que se guardó.
-    if (typeof navigator !== "undefined" && navigator.onLine === false) {
-      event.preventDefault();
-      setOfflineWarning(
-        "Sin conexión: esta entrada todavía no se puede guardar. Vuelve a intentarlo cuando regrese la señal."
-      );
+  // Sin conexión la entrada se encola en Dexie en vez de llamar a la Server
+  // Action: el operario está frente a la máquina, en una obra donde la señal
+  // va y viene, y es justo quien sabe qué se le hizo. La cola
+  // (lib/offline/sync.ts) la envía sola cuando vuelve Internet, y el id de la
+  // operación viaja como client_op_id para que un reintento tras una
+  // respuesta perdida no duplique la entrada (migración 048).
+  //
+  // El `id` del campo oculto `assetId` se guarda dentro del payload porque la
+  // ficha a la que pertenece la entrada no se puede deducir de otra forma al
+  // sincronizar, ni al listar las pendientes de ESTE equipo.
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    if (isOnline) {
+      setOfflineMessage(null);
       return;
     }
-    setOfflineWarning(null);
+
+    event.preventDefault();
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+
+    const payload: Record<string, unknown> = { assetId };
+    for (const field of ["title", "event_type", "performed_at", "performed_by_name", "hour_meter", "cost", "description"]) {
+      const raw = formData.get(field);
+      if (raw !== null && String(raw) !== "") payload[field] = String(raw);
+    }
+
+    const db = getOfflineDb(scopeKey);
+    await db.operations.add({
+      id: crypto.randomUUID(),
+      type: "CREATE_ASSET_HISTORY",
+      payload,
+      status: "PENDING",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      attempts: 0,
+      summary: String(payload.title ?? "Entrada del historial")
+    });
+
+    form.reset();
+    setFormOpen(false);
+    setOfflineMessage(
+      "Guardado sin conexión. Se sincronizará automáticamente cuando vuelva Internet."
+    );
   }
 
   return (
@@ -194,9 +290,13 @@ export function AssetHistoryTimeline({ assetId, assetName, items, canAddEntry, c
             </div>
           ) : null}
 
-          {offlineWarning ? (
-            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-              {offlineWarning}
+          {!isOnline ? (
+            <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              <CloudOff className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                Sin conexión: la entrada se guardará en este dispositivo y se sincronizará sola cuando vuelva
+                Internet.
+              </span>
             </div>
           ) : null}
 
@@ -278,6 +378,13 @@ export function AssetHistoryTimeline({ assetId, assetName, items, canAddEntry, c
         </div>
       ) : null}
 
+      {offlineMessage ? (
+        <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          <CloudOff className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{offlineMessage}</span>
+        </div>
+      ) : null}
+
       {visibleItems.length === 0 ? (
         <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
           <History className="mx-auto mb-2 h-5 w-5" />
@@ -313,12 +420,53 @@ export function AssetHistoryTimeline({ assetId, assetName, items, canAddEntry, c
                         </Badge>
                         {item.typeLabel ? <Badge variant="secondary">{item.typeLabel}</Badge> : null}
                         {item.statusLabel ? <Badge variant="secondary">{item.statusLabel}</Badge> : null}
+                        {item.syncStatus ? (
+                          <Badge variant={item.syncStatus === "FAILED" ? "destructive" : "warning"} className="gap-1">
+                            {item.syncStatus === "FAILED" ? (
+                              <AlertCircle className="h-3 w-3" />
+                            ) : item.syncStatus === "SYNCING" ? (
+                              <RefreshCw className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <CloudOff className="h-3 w-3" />
+                            )}
+                            {item.syncStatus === "FAILED"
+                              ? "No se pudo sincronizar"
+                              : item.syncStatus === "SYNCING"
+                                ? "Sincronizando..."
+                                : "Solo en este dispositivo"}
+                          </Badge>
+                        ) : null}
                       </div>
                       <p className="mt-2 break-words font-medium">{item.title}</p>
                       <p className="mt-1 text-sm text-muted-foreground">
                         {formatDate(item.date)}
                         {item.projectName ? ` · ${item.projectName}` : ""}
                       </p>
+                      {item.syncStatus === "FAILED" ? (
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          {item.syncError ? (
+                            <span className="text-xs text-destructive">{item.syncError}</span>
+                          ) : null}
+                          <Button
+                            type="button"
+                            size="xs"
+                            variant="outline"
+                            disabled={isSyncing}
+                            onClick={() => void syncNow()}
+                          >
+                            <RefreshCw className="h-3 w-3" /> Reintentar
+                          </Button>
+                          <Button
+                            type="button"
+                            size="xs"
+                            variant="ghost"
+                            className="text-muted-foreground hover:text-destructive"
+                            onClick={() => void discardOperation(scopeKey, item.queueOperationId!)}
+                          >
+                            Descartar
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
                       {item.href ? (
@@ -329,7 +477,10 @@ export function AssetHistoryTimeline({ assetId, assetName, items, canAddEntry, c
                           Ver
                         </Link>
                       ) : null}
-                      {canDeleteEntry && item.source === "HISTORY" ? (
+                      {/* Una entrada todavía en la cola no existe en Supabase:
+                          su id es el de la operación local, así que "Eliminar"
+                          fallaría. Se descarta desde su propio botón. */}
+                      {canDeleteEntry && item.source === "HISTORY" && !item.syncStatus ? (
                         <Button
                           type="button"
                           size="xs"

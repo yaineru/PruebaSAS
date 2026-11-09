@@ -39,6 +39,13 @@ export type QueueOperationType =
   | "CREATE_ASSET"
   | "CREATE_TECHNICAL_REPORT"
   | "CREATE_DOCUMENT"
+  // Entrada del historial libre de un equipo (public.asset_history). No es
+  // "CRUD" aunque sea un insert simple: el motor genérico de
+  // lib/actions/tenant-records.ts deriva el payload de ModuleConfig.fields y
+  // valida `table` contra la lista de módulos, y asset_history no es un
+  // módulo (no tiene página ni entrada de menú propia - vive dentro de la
+  // ficha del equipo). Tiene su propia Server Action, así que su propio tipo.
+  | "CREATE_ASSET_HISTORY"
   | "SEND_REPORT_EMAIL"
   | "GENERATE_REPORT"
   | "CALENDAR_CREATE_EVENT"

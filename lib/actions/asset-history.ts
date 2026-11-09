@@ -16,6 +16,7 @@ export type AssetHistoryActionState = {
 
 const uuidSchema = z.string().uuid();
 const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "La fecha no tiene un formato válido.");
+const UNIQUE_VIOLATION_CODE = "23505";
 
 function failure(error: string): AssetHistoryActionState {
   return { success: false, error };
@@ -124,6 +125,21 @@ export async function createAssetHistoryEntry(
       return failure("El equipo no existe o no pertenece a tu empresa.");
     }
 
+    // Clave de idempotencia de la cola offline (ver migración 048 y
+    // lib/offline/sync.ts): la genera el dispositivo al encolar y viaja igual
+    // en cada reintento, así que un envío que llegó al servidor pero cuya
+    // respuesta se perdió no puede duplicar la entrada.
+    const rawClientOpId = formData.get("client_op_id");
+    const clientOpIdResult = z
+      .string()
+      .uuid()
+      .optional()
+      .safeParse(rawClientOpId ? String(rawClientOpId) : undefined);
+    if (!clientOpIdResult.success) {
+      return failure("Identificador de sincronización inválido.");
+    }
+    const clientOpId = clientOpIdResult.data;
+
     const { error } = await supabase.from("asset_history").insert({
       company_id: tenant.companyId,
       asset_id: assetId,
@@ -135,10 +151,25 @@ export async function createAssetHistoryEntry(
       performed_by_name: performedByName,
       hour_meter: typeof hourMeter === "number" ? hourMeter : null,
       cost: typeof cost === "number" ? cost : 0,
-      created_by: tenant.userId
+      created_by: tenant.userId,
+      ...(clientOpId ? { client_op_id: clientOpId } : {})
     });
 
     if (error) {
+      // No es un duplicado real: esta misma entrada (mismo client_op_id) ya
+      // se sincronizó en un intento anterior cuya respuesta se perdió.
+      // Responder éxito evita que la cola la reintente para siempre y que el
+      // operario vea "error" por algo que en realidad quedó guardado.
+      if (
+        error.code === UNIQUE_VIOLATION_CODE &&
+        clientOpId !== undefined &&
+        error.message.includes("client_op_key")
+      ) {
+        console.warn("Asset history idempotent replay detected", { assetId, clientOpId });
+        revalidatePath(`/activos/${assetId}`);
+        return { success: true, message: "Sincronizado correctamente." };
+      }
+
       console.error("Asset history insert failed", {
         assetId,
         code: error.code,
@@ -147,6 +178,16 @@ export async function createAssetHistoryEntry(
       // 42P01 = la tabla no existe todavía: la migración 047 no se aplicó.
       if (error.code === "42P01") {
         return failure("El historial de equipos aún no está habilitado en la base de datos (falta aplicar la migración 047).");
+      }
+      // 42703/PGRST204 = falta `client_op_id` (migración 048 sin aplicar).
+      // Pasa solo en la ventana entre desplegar el código y correr la
+      // migración, y solo para una entrada que viene de la cola offline.
+      // Reintentar sin la clave duplicaría la fila si el primer intento sí
+      // había llegado, así que NO se reintenta: se dice qué falta.
+      if (error.code === "42703" || error.code === "PGRST204") {
+        return failure(
+          "El guardado sin conexión del historial aún no está habilitado en la base de datos (falta aplicar la migración 048)."
+        );
       }
       return failure("No se pudo guardar la entrada del historial. Intenta de nuevo.");
     }

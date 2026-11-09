@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getTenantContext } from "@/lib/tenant";
 import { getCompanySettings } from "@/lib/company-settings";
 import { getEnumLabel } from "@/lib/enums";
-import { formatDate } from "@/lib/utils";
+import { formatDate, timelineTimestamp } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AssetImageGallery, type GalleryComparison, type GalleryImage } from "@/components/asset-image-gallery";
@@ -226,7 +226,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
       projectName: null,
       href: "/documentos"
     }))
-  ].sort((a, b) => timestampOf(b.date) - timestampOf(a.date));
+  ].sort((a, b) => timelineTimestamp(b.date) - timelineTimestamp(a.date));
 
   const missingFields = getMissingAssetFields(asset);
   const assetLabel = settings.assetLabel;
@@ -416,17 +416,3 @@ function embeddedName(value: unknown): string | null {
   return null;
 }
 
-// Orden del timeline. Acepta tanto "YYYY-MM-DD" (columnas `date`, como
-// performed_at o maintenance_date) como un ISO completo (`timestamptz`, como
-// reported_at o created_at). Una fecha sin hora se ancla al día de calendario
-// por sus partes, igual que formatDate(), para que no se corra un día en
-// zonas detrás de UTC y el orden coincida con lo que se muestra.
-function timestampOf(value: string | null): number {
-  if (!value) return 0;
-  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  const date = dateOnly
-    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
-    : new Date(value);
-  const time = date.getTime();
-  return Number.isNaN(time) ? 0 : time;
-}

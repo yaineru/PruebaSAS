@@ -4,8 +4,8 @@ import { getModuleByKey } from "@/lib/modules";
 export default async function AssetsPage({
   searchParams
 }: {
-  searchParams: Promise<{ error?: string; q?: string; status?: string }>;
+  searchParams: Promise<{ error?: string; q?: string; status?: string; project?: string }>;
 }) {
   const params = await searchParams;
-  return <ModulePage module={getModuleByKey("assets")!} error={params.error} q={params.q} status={params.status} />;
+  return <ModulePage module={getModuleByKey("assets")!} error={params.error} q={params.q} status={params.status} project={params.project} />;
 }

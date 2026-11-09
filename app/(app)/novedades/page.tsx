@@ -4,10 +4,10 @@ import { getModuleByKey } from "@/lib/modules";
 export default async function IncidentsPage({
   searchParams
 }: {
-  searchParams: Promise<{ error?: string; q?: string; status?: string }>;
+  searchParams: Promise<{ error?: string; q?: string; status?: string; project?: string }>;
 }) {
   const params = await searchParams;
   return (
-    <ModulePage module={getModuleByKey("incidents")!} error={params.error} q={params.q} status={params.status} />
+    <ModulePage module={getModuleByKey("incidents")!} error={params.error} q={params.q} status={params.status} project={params.project} />
   );
 }

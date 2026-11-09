@@ -1,21 +1,27 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Archive, CalendarCheck, Camera, FileText, MapPin } from "lucide-react";
+import { Archive, Camera, FileText, FolderKanban, History, MapPin } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getTenantContext } from "@/lib/tenant";
+import { getCompanySettings } from "@/lib/company-settings";
 import { getEnumLabel } from "@/lib/enums";
 import { formatDate } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AssetImageGallery, type GalleryComparison, type GalleryImage } from "@/components/asset-image-gallery";
+import { AssetHistoryTimeline, type AssetTimelineItem } from "@/components/asset-history-timeline";
 import { getMissingAssetFields } from "@/lib/asset-completeness";
 
 type PageProps = {
   params: Promise<{ id: string }>;
 };
 
+type ProjectRef = { id: string; name: string; code: string | null } | null;
+
 export default async function AssetDetailPage({ params }: PageProps) {
   const { id } = await params;
   const tenant = await getTenantContext();
+  const settings = await getCompanySettings(tenant.companyId, tenant.companyName);
   const supabase = await createClient();
 
   const { data: asset } = await supabase
@@ -27,21 +33,64 @@ export default async function AssetDetailPage({ params }: PageProps) {
 
   if (!asset) notFound();
 
-  const [{ data: maintenance }, { data: documents }, { data: assetImages }, { data: imageComparisons }] = await Promise.all([
+  // El proyecto se consulta aparte en vez de con un embed
+  // (`select("*, project:project_id(...)")`) a propósito: un embed sobre una
+  // columna que todavía no existe hace fallar TODA la consulta, así que la
+  // ficha del equipo quedaría en 404 en cualquier instancia donde la
+  // migración 047 aún no se haya aplicado. `select("*")` devuelve project_id
+  // si existe y lo omite si no, sin romper nada.
+  let project: ProjectRef = null;
+  if (asset.project_id) {
+    const { data: projectRow } = await supabase
+      .from("projects")
+      .select("id,name,code")
+      .eq("company_id", tenant.companyId)
+      .eq("id", asset.project_id)
+      .maybeSingle();
+    project = projectRow ?? null;
+  }
+
+  const [
+    { data: maintenance },
+    { data: documents },
+    { data: incidents },
+    { data: historyEntries, error: historyError },
+    { data: assetImages },
+    { data: imageComparisons }
+  ] = await Promise.all([
     supabase
       .from("maintenance_records")
-      .select("id,title,maintenance_date,type,description,cost,responsible_name,status")
+      .select("id,title,maintenance_date,type,description,cost,responsible_name,status,project:project_id(name)")
       .eq("company_id", tenant.companyId)
       .eq("asset_id", id)
       .order("maintenance_date", { ascending: false })
-      .limit(20),
+      .limit(50),
     supabase
       .from("asset_documents")
-      .select("id,title,type,expires_at,status,url")
+      .select("id,title,type,expires_at,status,url,created_at")
       .eq("company_id", tenant.companyId)
       .eq("asset_id", id)
       .order("expires_at", { ascending: true })
-      .limit(20),
+      .limit(50),
+    supabase
+      .from("incidents")
+      .select("id,title,description,priority,status,reported_at,location,project:project_id(name)")
+      .eq("company_id", tenant.companyId)
+      .eq("asset_id", id)
+      .order("reported_at", { ascending: false })
+      .limit(50),
+    // asset_history (migración 047). Se consulta con su propio error en vez
+    // de dejar que un fallo tire la página entera: si la migración todavía no
+    // se aplicó, el resto de la ficha (y el historial de mantenimientos, que
+    // ya funcionaba) tiene que seguir cargando igual.
+    supabase
+      .from("asset_history")
+      .select("id,title,description,event_type,performed_at,performed_by_name,cost,hour_meter,project:project_id(name)")
+      .eq("company_id", tenant.companyId)
+      .eq("asset_id", id)
+      .order("performed_at", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(100),
     supabase
       .from("asset_images")
       .select("id,file_path,title,image_type,created_at")
@@ -57,6 +106,14 @@ export default async function AssetDetailPage({ params }: PageProps) {
       .order("created_at", { ascending: false })
       .limit(20)
   ]);
+
+  if (historyError) {
+    console.warn("Asset history unavailable", {
+      assetId: id,
+      code: historyError.code,
+      message: historyError.message
+    });
+  }
 
   // PostgREST returns a single embedded object for a many-to-one FK join
   // (each comparison references exactly one before/after asset_images row),
@@ -105,7 +162,80 @@ export default async function AssetDetailPage({ params }: PageProps) {
     notes: comparison.notes
   }));
 
+  // Un solo timeline con las cuatro fuentes de "qué se le ha hecho al
+  // equipo". Se arma en el servidor (donde ya están los datos) y se ordena
+  // por la fecha del HECHO, no por created_at: un mantenimiento del mes
+  // pasado que se registró hoy pertenece al mes pasado en la cronología.
+  const timeline: AssetTimelineItem[] = [
+    ...(historyEntries ?? []).map((entry) => ({
+      id: entry.id,
+      source: "HISTORY" as const,
+      date: entry.performed_at,
+      title: entry.title,
+      typeLabel: getEnumLabel("assetHistoryEventType", entry.event_type),
+      statusLabel: null,
+      description: entry.description,
+      person: entry.performed_by_name,
+      cost: entry.cost === null ? null : Number(entry.cost),
+      hourMeter: entry.hour_meter === null ? null : Number(entry.hour_meter),
+      projectName: embeddedName(entry.project),
+      href: null
+    })),
+    ...(maintenance ?? []).map((item) => ({
+      id: item.id,
+      source: "MAINTENANCE" as const,
+      date: item.maintenance_date,
+      title: item.title,
+      typeLabel: getEnumLabel("maintenanceType", item.type),
+      statusLabel: getEnumLabel("maintenanceStatus", item.status),
+      description: item.description,
+      person: item.responsible_name,
+      cost: item.cost === null ? null : Number(item.cost),
+      hourMeter: null,
+      projectName: embeddedName(item.project),
+      href: "/mantenimientos"
+    })),
+    ...(incidents ?? []).map((item) => ({
+      id: item.id,
+      source: "INCIDENT" as const,
+      date: item.reported_at,
+      title: item.title,
+      typeLabel: getEnumLabel("incidentPriority", item.priority),
+      statusLabel: getEnumLabel("incidentStatus", item.status),
+      description: item.description,
+      person: null,
+      cost: null,
+      hourMeter: null,
+      projectName: embeddedName(item.project) ?? item.location,
+      href: "/novedades"
+    })),
+    ...(documents ?? []).map((item) => ({
+      id: item.id,
+      source: "DOCUMENT" as const,
+      // Un documento entra a la cronología el día que se cargó; su
+      // expires_at es una fecha futura y lo dejaría flotando arriba del
+      // timeline como si fuera lo último que pasó.
+      date: item.created_at,
+      title: item.title,
+      typeLabel: getEnumLabel("documentType", item.type),
+      statusLabel: null,
+      description: item.expires_at ? `Vence el ${formatDate(item.expires_at)}` : null,
+      person: null,
+      cost: null,
+      hourMeter: null,
+      projectName: null,
+      href: "/documentos"
+    }))
+  ].sort((a, b) => timestampOf(b.date) - timestampOf(a.date));
+
   const missingFields = getMissingAssetFields(asset);
+  const assetLabel = settings.assetLabel;
+
+  // Misma escala que las policies de asset_history (migración 047) y que
+  // lib/actions/asset-history.ts: anotar puede cualquier miembro operativo
+  // (el operario es quien sabe qué se le hizo), borrar solo un administrador.
+  const canAddEntry = ["SUPER_ADMIN", "ADMIN", "SUPERVISOR", "OPERARIO"].includes(tenant.role);
+  const canDeleteEntry = ["SUPER_ADMIN", "ADMIN"].includes(tenant.role);
 
   const details = [
     ["Código interno", asset.code],
@@ -124,25 +254,47 @@ export default async function AssetDetailPage({ params }: PageProps) {
 
   return (
     <div className="space-y-6 pb-20 lg:pb-0">
-      <section className="rounded-md border bg-card p-5 sm:p-6">
+      <section className="rounded-md border bg-card p-4 sm:p-6">
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
-          <div>
+          <div className="min-w-0">
             <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-md bg-primary/10 text-primary">
               <Archive className="h-5 w-5" />
             </div>
-            <h1 className="text-2xl font-semibold tracking-normal sm:text-3xl">{asset.name}</h1>
-            <p className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
-              <MapPin className="h-4 w-4" />
-              {asset.location ?? "Sin ubicación"}
-            </p>
+            <Link
+              href="/activos"
+              className="text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
+            >
+              ← Volver a {assetLabel}
+            </Link>
+            <h1 className="mt-1 break-words text-2xl font-semibold tracking-normal sm:text-3xl">{asset.name}</h1>
+            <div className="mt-2 flex flex-col gap-1 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4">
+              <span className="flex items-center gap-2">
+                <MapPin className="h-4 w-4 shrink-0" />
+                {asset.location ?? "Sin ubicación"}
+              </span>
+              <span className="flex items-center gap-2">
+                <FolderKanban className="h-4 w-4 shrink-0" />
+                {project ? (
+                  <Link className="text-primary hover:underline" href={`/activos?project=${project.id}`}>
+                    {project.name}
+                    {project.code ? ` (${project.code})` : ""}
+                  </Link>
+                ) : (
+                  "Sin proyecto asignado"
+                )}
+              </span>
+            </div>
           </div>
-          <Badge variant="secondary">{getEnumLabel("assetStatus", asset.status)}</Badge>
+          <Badge variant="secondary" className="self-start lg:self-auto">
+            {getEnumLabel("assetStatus", asset.status)}
+          </Badge>
         </div>
         {missingFields.length > 0 ? (
           <div className="mt-4 rounded-md border border-accent/40 bg-accent/10 p-3 text-sm text-accent-foreground">
             <p className="font-medium">⚠ Información pendiente</p>
             <p className="mt-1 text-muted-foreground">
-              Faltan: {missingFields.join(", ")}. Puedes completarlos desde Equipos → Editar cuando tengas esos datos.
+              Faltan: {missingFields.join(", ")}. Puedes completarlos desde {assetLabel} → Editar cuando tengas esos
+              datos.
             </p>
           </div>
         ) : null}
@@ -156,10 +308,23 @@ export default async function AssetDetailPage({ params }: PageProps) {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-md border p-3 sm:col-span-2">
+                <p className="text-xs text-muted-foreground">Proyecto / obra</p>
+                <p className="mt-1 break-words text-sm font-medium">
+                  {project ? (
+                    <Link className="text-primary hover:underline" href={`/activos?project=${project.id}`}>
+                      {project.name}
+                      {project.code ? ` (${project.code})` : ""}
+                    </Link>
+                  ) : (
+                    "Sin asignar"
+                  )}
+                </p>
+              </div>
               {details.map(([label, value]) => (
                 <div className="rounded-md border p-3" key={String(label)}>
                   <p className="text-xs text-muted-foreground">{label}</p>
-                  <p className="mt-1 text-sm font-medium">{value ?? "-"}</p>
+                  <p className="mt-1 break-words text-sm font-medium">{value ?? "-"}</p>
                 </div>
               ))}
             </div>
@@ -169,39 +334,28 @@ export default async function AssetDetailPage({ params }: PageProps) {
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2">
-              <CalendarCheck className="h-4 w-4 text-primary" />
-              <CardTitle>Historial de mantenimientos</CardTitle>
+              <History className="h-4 w-4 shrink-0 text-primary" />
+              <CardTitle>Historial del equipo</CardTitle>
             </div>
-            <CardDescription>Timeline de intervenciones, responsables y costos.</CardDescription>
+            <CardDescription>
+              Todo lo que se le ha hecho a esta máquina: intervenciones del día a día, mantenimientos, novedades y
+              documentos, en una sola línea de tiempo.
+            </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {(maintenance ?? []).length === 0 ? (
-              <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-                No hay mantenimientos registrados para esta máquina.
-              </p>
-            ) : (
-              maintenance?.map((item) => (
-                <div className="relative border-l pl-4" key={item.id}>
-                  <div className="absolute -left-1.5 top-1 h-3 w-3 rounded-full bg-primary" />
-                  <div className="rounded-md border p-4">
-                    <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
-                      <div>
-                        <p className="font-medium">{item.title}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {formatDate(item.maintenance_date)} - {getEnumLabel("maintenanceType", item.type)}
-                        </p>
-                      </div>
-                      <Badge variant="secondary">{getEnumLabel("maintenanceStatus", item.status)}</Badge>
-                    </div>
-                    <p className="mt-3 text-sm text-muted-foreground">{item.description ?? "Sin descripción"}</p>
-                    <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-                      <span>Responsable: {item.responsible_name ?? "-"}</span>
-                      <span>Costo: {Number(item.cost ?? 0).toLocaleString("es-CO")}</span>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
+          <CardContent>
+            {historyError ? (
+              <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                El registro libre de intervenciones aún no está habilitado en la base de datos (falta aplicar la
+                migración 047). Mientras tanto se muestran mantenimientos, novedades y documentos.
+              </div>
+            ) : null}
+            <AssetHistoryTimeline
+              assetId={asset.id}
+              assetName={asset.name}
+              items={timeline}
+              canAddEntry={canAddEntry && !historyError}
+              canDeleteEntry={canDeleteEntry}
+            />
           </CardContent>
         </Card>
       </section>
@@ -209,7 +363,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
-            <Camera className="h-4 w-4 text-primary" />
+            <Camera className="h-4 w-4 shrink-0 text-primary" />
             <CardTitle>Fotografías</CardTitle>
           </div>
           <CardDescription>Fotos del equipo, con comparación antes/después cuando haya al menos dos imágenes.</CardDescription>
@@ -222,7 +376,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
-            <FileText className="h-4 w-4 text-primary" />
+            <FileText className="h-4 w-4 shrink-0 text-primary" />
             <CardTitle>Documentos asociados</CardTitle>
           </div>
           <CardDescription>Certificados, polizas, manuales y archivos con vencimiento.</CardDescription>
@@ -235,7 +389,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
           ) : (
             documents?.map((document) => (
               <div className="rounded-md border p-4" key={document.id}>
-                <p className="font-medium">{document.title}</p>
+                <p className="break-words font-medium">{document.title}</p>
                 <p className="mt-1 text-sm text-muted-foreground">
                   {getEnumLabel("documentType", document.type)} - vence {formatDate(document.expires_at)}
                 </p>
@@ -247,4 +401,32 @@ export default async function AssetDetailPage({ params }: PageProps) {
       </Card>
     </div>
   );
+}
+
+// Los embeds de PostgREST (`project:project_id(name)`) llegan como objeto en
+// tiempo de ejecución pero tipados como array cuando no hay tipos generados;
+// este helper acepta ambas formas en vez de repetir el casteo en cada fuente
+// del timeline.
+function embeddedName(value: unknown): string | null {
+  const entry = Array.isArray(value) ? value[0] : value;
+  if (entry && typeof entry === "object" && "name" in entry) {
+    const name = (entry as { name: unknown }).name;
+    return typeof name === "string" ? name : null;
+  }
+  return null;
+}
+
+// Orden del timeline. Acepta tanto "YYYY-MM-DD" (columnas `date`, como
+// performed_at o maintenance_date) como un ISO completo (`timestamptz`, como
+// reported_at o created_at). Una fecha sin hora se ancla al día de calendario
+// por sus partes, igual que formatDate(), para que no se corra un día en
+// zonas detrás de UTC y el orden coincida con lo que se muestra.
+function timestampOf(value: string | null): number {
+  if (!value) return 0;
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  const date = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : new Date(value);
+  const time = date.getTime();
+  return Number.isNaN(time) ? 0 : time;
 }

@@ -33,7 +33,33 @@ export type ModuleConfig = {
   fields: ModuleField[];
 };
 
+// El ORDEN de este array es el orden del menú (barra lateral en escritorio y
+// barra inferior en móvil, ambas resueltas por getVisibleModules() en
+// lib/company-settings.ts) - ningún otro archivo depende de él.
+//
+// Obras va primero y Equipos justo después porque el flujo real de Progrúas
+// empieza por la obra: un equipo se registra para asignarlo a un frente de
+// trabajo, así que la obra tiene que existir antes de que su <select> en el
+// formulario de Equipos tenga algo que elegir. Después van los registros que
+// se hacen SOBRE un equipo (Mantenimientos, Novedades, Documentos) y al final
+// las salidas (Informes) y la administración (Usuarios).
 export const modules: ModuleConfig[] = [
+  {
+    key: "projects",
+    href: "/proyectos",
+    title: "Obras",
+    description: "Frentes de trabajo, ubicación, avance y estado operativo.",
+    icon: FolderKanban,
+    table: "projects",
+    empty: "Aún no hay obras creadas.",
+    fields: [
+      { name: "name", label: "Obra", placeholder: "Viaducto norte", required: true },
+      { name: "code", label: "Código de obra", placeholder: "OB-001" },
+      { name: "location", label: "Ubicación", placeholder: "Bogotá" },
+      { name: "due_date", label: "Fecha final", type: "date" },
+      { name: "status", label: "Estado", enumKey: "projectStatus", options: ENUM_OPTIONS.projectStatus }
+    ]
+  },
   {
     key: "assets",
     href: "/activos",
@@ -45,6 +71,12 @@ export const modules: ModuleConfig[] = [
     fields: [
       { name: "name", label: "Máquina", placeholder: "Excavadora principal", required: true },
       { name: "code", label: "Código interno", placeholder: "EQ-001", required: true },
+      // Tercer campo a propósito: las columnas del listado son los 4 primeros
+      // campos declarados (ver visibleColumns en components/module-page.tsx),
+      // así que poner el proyecto aquí es lo que hace que al BUSCAR un equipo
+      // se vea de inmediato a qué obra pertenece, sin abrir su ficha.
+      // Opcional: un equipo en bodega o entre obras no pertenece a ninguna.
+      { name: "project_id", label: "Proyecto relacionado", type: "uuid" },
       { name: "location", label: "Ubicación", placeholder: "Obra norte" },
       { name: "plate", label: "Placa", placeholder: "ABC-123" },
       { name: "brand", label: "Marca", placeholder: "Caterpillar" },
@@ -79,53 +111,6 @@ export const modules: ModuleConfig[] = [
     ]
   },
   {
-    key: "asset_documents",
-    href: "/documentos",
-    title: "Documentos",
-    description: "Polizas, certificados, licencias, manuales y evidencias.",
-    icon: FileText,
-    table: "asset_documents",
-    empty: "Aún no hay documentos cargados.",
-    fields: [
-      { name: "title", label: "Documento", placeholder: "Certificado tecnico", required: true },
-      { name: "asset_id", label: "Activo relacionado", type: "uuid", required: true },
-      { name: "project_id", label: "Proyecto relacionado", type: "uuid" },
-      { name: "maintenance_record_id", label: "Mantenimiento relacionado", type: "uuid" },
-      { name: "type", label: "Tipo", enumKey: "documentType", options: ENUM_OPTIONS.documentType },
-      { name: "expires_at", label: "Fecha de vencimiento", type: "date" },
-      { name: "status", label: "Estado", options: ENUM_OPTIONS.recordStatus }
-    ]
-  },
-  {
-    key: "projects",
-    href: "/proyectos",
-    title: "Obras",
-    description: "Frentes de trabajo, ubicación, avance y estado operativo.",
-    icon: FolderKanban,
-    table: "projects",
-    empty: "Aún no hay obras creadas.",
-    fields: [
-      { name: "name", label: "Obra", placeholder: "Viaducto norte", required: true },
-      { name: "location", label: "Ubicación", placeholder: "Bogotá" },
-      { name: "due_date", label: "Fecha final", type: "date" },
-      { name: "status", label: "Estado", enumKey: "projectStatus", options: ENUM_OPTIONS.projectStatus }
-    ]
-  },
-  {
-    key: "users",
-    href: "/usuarios",
-    title: "Usuarios",
-    description: "Perfiles, roles y acceso por empresa.",
-    icon: UsersRound,
-    table: "users",
-    empty: "Aún no hay usuarios internos.",
-    fields: [
-      { name: "full_name", label: "Nombre", placeholder: "Ana Pérez", required: true },
-      { name: "email", label: "Correo", type: "email", placeholder: "ana@empresa.com" },
-      { name: "role", label: "Rol", enumKey: "appRole", options: ENUM_OPTIONS.appRole }
-    ]
-  },
-  {
     key: "incidents",
     href: "/novedades",
     title: "Novedades",
@@ -141,6 +126,24 @@ export const modules: ModuleConfig[] = [
       { name: "priority", label: "Prioridad", enumKey: "incidentPriority", options: ENUM_OPTIONS.incidentPriority },
       { name: "status", label: "Estado", enumKey: "incidentStatus", options: ENUM_OPTIONS.incidentStatus },
       { name: "location", label: "Ubicación", placeholder: "Obra norte" }
+    ]
+  },
+  {
+    key: "asset_documents",
+    href: "/documentos",
+    title: "Documentos",
+    description: "Polizas, certificados, licencias, manuales y evidencias.",
+    icon: FileText,
+    table: "asset_documents",
+    empty: "Aún no hay documentos cargados.",
+    fields: [
+      { name: "title", label: "Documento", placeholder: "Certificado tecnico", required: true },
+      { name: "asset_id", label: "Activo relacionado", type: "uuid", required: true },
+      { name: "project_id", label: "Proyecto relacionado", type: "uuid" },
+      { name: "maintenance_record_id", label: "Mantenimiento relacionado", type: "uuid" },
+      { name: "type", label: "Tipo", enumKey: "documentType", options: ENUM_OPTIONS.documentType },
+      { name: "expires_at", label: "Fecha de vencimiento", type: "date" },
+      { name: "status", label: "Estado", options: ENUM_OPTIONS.recordStatus }
     ]
   },
   {
@@ -162,6 +165,20 @@ export const modules: ModuleConfig[] = [
     table: "generated_reports",
     empty: "Aún no hay informes técnicos generados.",
     fields: []
+  },
+  {
+    key: "users",
+    href: "/usuarios",
+    title: "Usuarios",
+    description: "Perfiles, roles y acceso por empresa.",
+    icon: UsersRound,
+    table: "users",
+    empty: "Aún no hay usuarios internos.",
+    fields: [
+      { name: "full_name", label: "Nombre", placeholder: "Ana Pérez", required: true },
+      { name: "email", label: "Correo", type: "email", placeholder: "ana@empresa.com" },
+      { name: "role", label: "Rol", enumKey: "appRole", options: ENUM_OPTIONS.appRole }
+    ]
   }
 ];
 

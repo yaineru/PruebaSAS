@@ -47,6 +47,14 @@ const FK_TABLE_BY_FIELD: Record<string, string> = {
 
 const UNIQUE_VIOLATION_CODE = "23505";
 const FOREIGN_KEY_VIOLATION_CODE = "23503";
+// Un campo declarado en ModuleConfig.fields cuya columna todavía no existe en
+// la base de datos (migración pendiente). Postgres responde 42703 y PostgREST
+// PGRST204 según por dónde falle; sin este caso el usuario solo veía
+// "verifica los datos e intenta de nuevo" y no había forma de deducir que lo
+// que falta es correr una migración.
+const UNDEFINED_COLUMN_CODES = new Set(["42703", "PGRST204"]);
+const missingColumnError =
+  "La base de datos no tiene todavía una de las columnas de este formulario. Falta aplicar la última migración de supabase/migrations.";
 const uniqueConstraintMessages: Record<string, string> = {
   assets_company_id_code_key: "Ya existe un activo con ese código en tu empresa.",
   projects_company_id_code_key: "Ya existe una obra con ese código en tu empresa."
@@ -383,6 +391,10 @@ export async function createTenantRecord(
         details: error.details
       });
 
+      if (error.code && UNDEFINED_COLUMN_CODES.has(error.code)) {
+        return failure(missingColumnError);
+      }
+
       if (error.code === UNIQUE_VIOLATION_CODE) {
         const constraintName = Object.keys(uniqueConstraintMessages).find((key) => error.message.includes(key));
         return failure(
@@ -463,6 +475,10 @@ export async function updateTenantRecord(
         message: error.message,
         details: error.details
       });
+
+      if (error.code && UNDEFINED_COLUMN_CODES.has(error.code)) {
+        return failure(missingColumnError);
+      }
 
       if (error.code === UNIQUE_VIOLATION_CODE) {
         const constraintName = Object.keys(uniqueConstraintMessages).find((key) => error.message.includes(key));

@@ -107,8 +107,8 @@ export function applyCompanySettings(module: ModuleConfig, settings: CompanySett
 
   const withRelationLabels = (fields: ModuleConfig["fields"]) =>
     fields.map((field) => {
-      if (field.name === "asset_id") return { ...field, label: `${singularize(asset)} relacionado` };
-      if (field.name === "project_id") return { ...field, label: `${singularize(project)} relacionado` };
+      if (field.name === "asset_id") return { ...field, label: relatedLabel(asset) };
+      if (field.name === "project_id") return { ...field, label: relatedLabel(project) };
       return field;
     });
 
@@ -143,6 +143,7 @@ export function applyCompanySettings(module: ModuleConfig, settings: CompanySett
       empty: `Aún no hay ${project.toLowerCase()} creados.`,
       fields: withRelationLabels(module.fields).map((field) => {
         if (field.name === "name") return { ...field, label: singularize(project), placeholder: `Nombre de ${singularize(project).toLowerCase()}` };
+        if (field.name === "code") return { ...field, label: `Código de ${singularize(project).toLowerCase()}` };
         return field;
       })
     };
@@ -162,6 +163,18 @@ export function applyCompanySettings(module: ModuleConfig, settings: CompanySett
   }
 
   return { ...module, fields: withRelationLabels(module.fields) };
+}
+
+// "Obra relacionado" / "Máquina relacionado" eran incorrectos: el participio
+// tiene que concordar en género con el sustantivo que etiqueta, y la etiqueta
+// la elige cada empresa (company_settings.asset_label / project_label), así
+// que no se puede dejar fija en masculino. Se decide por la terminación del
+// singular - suficiente para las etiquetas reales que usan los nichos
+// ("Obra", "Máquina", "Sede" -> femenino; "Equipo", "Proyecto", "Activo",
+// "Vehículo" -> masculino) y sin tabla de palabras que mantener.
+function relatedLabel(pluralLabel: string) {
+  const singular = singularize(pluralLabel);
+  return `${singular} ${singular.toLowerCase().endsWith("a") ? "relacionada" : "relacionado"}`;
 }
 
 function singularize(label: string) {

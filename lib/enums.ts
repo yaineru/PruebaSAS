@@ -97,6 +97,20 @@ export const ENUM_OPTIONS = {
     { value: "ACTIVE", label: "Activo", aliases: ["activo", "active"] },
     { value: "INACTIVE", label: "Inactivo", aliases: ["inactivo", "inactive"] },
     { value: "ARCHIVED", label: "Archivado", aliases: ["archivado", "archived"] }
+  ],
+  // Historial libre del equipo (public.asset_history, ver migración 047).
+  // Catálogo propio, NO el enum nativo `maintenance_type`: son las
+  // intervenciones del día a día que no justifican abrir un mantenimiento
+  // formal con estado y responsable ("se cambió un tornillo", "se movió a la
+  // obra norte", una nota del operario). Debe coincidir exactamente con el
+  // CHECK de asset_history.event_type.
+  assetHistoryEventType: [
+    { value: "INTERVENTION", label: "Intervención", aliases: ["intervencion", "intervention", "trabajo"] },
+    { value: "PART_CHANGE", label: "Cambio de pieza", aliases: ["cambio de pieza", "repuesto", "part_change"] },
+    { value: "INSPECTION", label: "Revisión", aliases: ["revision", "inspeccion", "inspection"] },
+    { value: "TRANSFER", label: "Traslado", aliases: ["traslado", "transfer", "movimiento"] },
+    { value: "NOTE", label: "Nota", aliases: ["nota", "note", "observacion"] },
+    { value: "OTHER", label: "Otro", aliases: ["otro", "other"] }
   ]
 } as const;
 

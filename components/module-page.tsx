@@ -7,7 +7,7 @@ import { getMissingAssetFields } from "@/lib/asset-completeness";
 import { getEnumLabel } from "@/lib/enums";
 import { createClient } from "@/lib/supabase/server";
 import { formatDate } from "@/lib/utils";
-import { listTenantRows, getTenantContext, type ModuleKey } from "@/lib/tenant";
+import { listTenantRows, getTenantContext, NO_RELATION_VALUE, type ModuleKey } from "@/lib/tenant";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,12 +39,14 @@ export async function ModulePage({
   module,
   error,
   q,
-  status
+  status,
+  project
 }: {
   module: ModuleConfig;
   error?: string;
   q?: string;
   status?: string;
+  project?: string;
 }) {
   const tenant = await getTenantContext();
   const settings = await getCompanySettings(tenant.companyId, tenant.companyName);
@@ -59,6 +61,9 @@ export async function ModulePage({
   }
 
   const visibleModule = await withRelationOptions(applyCompanySettings(module, settings), tenant.companyId);
+  // Etiqueta que esta empresa le da al módulo de equipos ("Equipos" para
+  // Progrúas); se usa en el listado de Obras para enlazar a su maquinaria.
+  const assetLabel = settings.assetLabel;
   let rows: TenantRow[] = [];
   let listError: string | null = null;
 
@@ -72,6 +77,14 @@ export async function ModulePage({
     visibleModule.fields.find((field) => field.name === "role" && field.enumKey);
   const searchValue = (q ?? "").trim();
   const statusValue = (status ?? "").trim();
+
+  // El pedido concreto: al buscar un equipo, poder acotar la lista a una obra
+  // ("los equipos de tal proyecto"). Se declara a partir del campo project_id
+  // del propio módulo, así que cualquier módulo que lo tenga (Equipos,
+  // Mantenimientos, Novedades, Documentos) hereda el filtro sin código nuevo.
+  // Las opciones ya vienen resueltas por withRelationOptions() arriba.
+  const projectField = visibleModule.fields.find((field) => field.name === "project_id");
+  const projectValue = (project ?? "").trim();
 
   // The table only has room for a handful of columns, so it shows the first
   // 4 declared fields - but for most modules that means "status" (declared
@@ -116,7 +129,9 @@ export async function ModulePage({
       search: searchValue || undefined,
       searchField,
       filterField: filterField?.name,
-      filterValue: statusValue || undefined
+      filterValue: statusValue || undefined,
+      relationField: projectField ? "project_id" : undefined,
+      relationValue: projectField ? projectValue || undefined : undefined
     })) as TenantRow[];
   } catch (caughtError) {
     console.error("Module rows failed to load", {
@@ -142,8 +157,13 @@ export async function ModulePage({
         <Badge variant="secondary">{rows.length} registros</Badge>
       </section>
 
+      {/* min-w-0 en los hijos: sin esto, el ancho mínimo automático de un item
+          de grid lo calcula su contenido, así que la tabla de registros (ahora
+          con una columna más - el proyecto) ensanchaba la página entera en vez
+          de usar su propio overflow-x-auto (components/ui/table.tsx), y
+          aparecía scroll horizontal en TODA la pantalla en móvil. */}
       <section className="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
-        <Card>
+        <Card className="min-w-0">
           <CardHeader>
             <CardTitle>Nuevo registro</CardTitle>
             <CardDescription>Completa los campos requeridos para crear un registro.</CardDescription>
@@ -175,14 +195,14 @@ export async function ModulePage({
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="min-w-0">
           <CardHeader>
             <CardTitle>Registros recientes</CardTitle>
             <CardDescription>Información privada de tu empresa.</CardDescription>
           </CardHeader>
           <CardContent>
-            <form method="get" className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end">
-              <div className="flex-1 space-y-2">
+            <form method="get" className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+              <div className="min-w-[12rem] flex-1 space-y-2">
                 <Label htmlFor="q">Buscar</Label>
                 <Input
                   id="q"
@@ -209,11 +229,30 @@ export async function ModulePage({
                   </select>
                 </div>
               ) : null}
+              {projectField ? (
+                <div className="w-full space-y-2 sm:w-56">
+                  <Label htmlFor="project">{projectField.label.replace(/ relacionad[oa]$/, "")}</Label>
+                  <select
+                    id="project"
+                    name="project"
+                    defaultValue={projectValue}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="">Todos</option>
+                    <option value={NO_RELATION_VALUE}>Sin asignar</option>
+                    {(projectField.options ?? []).map((option) => (
+                      <option value={option.value} key={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
               <div className="flex gap-2">
                 <Button type="submit" variant="outline">
                   Buscar
                 </Button>
-                {searchValue || statusValue ? (
+                {searchValue || statusValue || projectValue ? (
                   <Link
                     href={visibleModule.href}
                     className="inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-medium text-muted-foreground hover:bg-muted"
@@ -239,6 +278,7 @@ export async function ModulePage({
                       <TableHead key={field.name}>{field.label}</TableHead>
                     ))}
                     {visibleModule.table === "assets" ? <TableHead>Información</TableHead> : null}
+                    {visibleModule.table === "projects" ? <TableHead>{assetLabel}</TableHead> : null}
                     <TableHead>Creado</TableHead>
                     {visibleModule.table === "asset_documents" || canDelete || canEdit ? (
                       <TableHead>Acciones</TableHead>
@@ -254,6 +294,15 @@ export async function ModulePage({
                             <Link className="font-medium text-primary hover:underline" href={`/activos/${row.id}`}>
                               {renderCell(row[field.name], field)}
                             </Link>
+                          ) : field.name === "project_id" && row.project_id ? (
+                            // Ver el proyecto no basta: lo que se busca después
+                            // de reconocerlo es "¿qué más hay en esta obra?".
+                            <Link
+                              className="text-primary hover:underline"
+                              href={`${visibleModule.href}?project=${row.project_id}`}
+                            >
+                              {renderCell(row[field.name], field)}
+                            </Link>
                           ) : (
                             renderCell(row[field.name], field, filterField?.name === field.name)
                           )}
@@ -262,6 +311,16 @@ export async function ModulePage({
                       {visibleModule.table === "assets" ? (
                         <TableCell>
                           <AssetCompletenessBadge row={row} />
+                        </TableCell>
+                      ) : null}
+                      {visibleModule.table === "projects" ? (
+                        <TableCell>
+                          <Link
+                            className="whitespace-nowrap text-sm text-primary hover:underline"
+                            href={`/activos?project=${row.id}`}
+                          >
+                            Ver {assetLabel.toLowerCase()}
+                          </Link>
                         </TableCell>
                       ) : null}
                       <TableCell className="text-muted-foreground">

@@ -127,7 +127,17 @@ export type TenantRowFilters = {
   searchField?: string;
   filterField?: string;
   filterValue?: string;
+  // Filtro extra por relación (hoy: project_id en el listado de Equipos).
+  // Va aparte de filterField/filterValue porque ese par ya está ocupado por
+  // el filtro de estado y los dos se combinan: "equipos de la obra X que
+  // están en mantenimiento". El valor especial "none" filtra por IS NULL -
+  // "equipos sin obra asignada" es una búsqueda real (lo que está en bodega)
+  // y `.eq()` nunca puede expresarla.
+  relationField?: string;
+  relationValue?: string;
 };
+
+export const NO_RELATION_VALUE = "none";
 
 export async function listTenantRows(table: ModuleKey, companyId: string, filters: TenantRowFilters = {}) {
   const supabase = await createClient();
@@ -142,6 +152,13 @@ export async function listTenantRows(table: ModuleKey, companyId: string, filter
 
   if (filters.filterValue && filters.filterField) {
     query = query.eq(filters.filterField, filters.filterValue);
+  }
+
+  if (filters.relationValue && filters.relationField) {
+    query =
+      filters.relationValue === NO_RELATION_VALUE
+        ? query.is(filters.relationField, null)
+        : query.eq(filters.relationField, filters.relationValue);
   }
 
   const { data, error } = await query.order("created_at", { ascending: false }).limit(50);

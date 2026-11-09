@@ -4,7 +4,7 @@ import { getModuleByKey } from "@/lib/modules";
 export default async function DocumentsPage({
   searchParams
 }: {
-  searchParams: Promise<{ error?: string; q?: string; status?: string }>;
+  searchParams: Promise<{ error?: string; q?: string; status?: string; project?: string }>;
 }) {
   const params = await searchParams;
   return (
@@ -13,6 +13,7 @@ export default async function DocumentsPage({
       error={params.error}
       q={params.q}
       status={params.status}
+      project={params.project}
     />
   );
 }

@@ -39,13 +39,14 @@ export function TenantRecordEditButton({
 
       {open ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <Card className="w-full max-w-md max-h-[90vh] overflow-y-auto">
-            <CardHeader className="flex flex-row items-start justify-between space-y-0">
-              <CardTitle>Editar {recordLabel}</CardTitle>
+          <Card className="max-h-[90vh] w-full max-w-md overflow-y-auto">
+            <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+              <CardTitle className="min-w-0 break-words">Editar {recordLabel}</CardTitle>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="text-muted-foreground hover:text-foreground"
+                aria-label="Cerrar"
+                className="shrink-0 text-muted-foreground hover:text-foreground"
               >
                 <X className="h-5 w-5" />
               </button>

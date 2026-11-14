@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronRight, Download, Folder, FolderOpen, FolderInput, Loader, Mail, Pencil } from "lucide-react";
+import { ChevronRight, Download, Folder, FolderOpen, FolderInput, Loader, Mail, Pencil, Tag } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SendReportEmailModal } from "@/components/send-report-email-modal";
 import { MoveReportFolderModal } from "@/components/move-report-folder-modal";
+import { NameReportModal } from "@/components/name-report-modal";
 import { formatDate } from "@/lib/utils";
 import { REPORT_ENTITY_LABELS } from "@/lib/reports/entity-labels";
 import { MONTH_NAMES_ES } from "@/lib/reports/report-folders";
@@ -54,6 +55,7 @@ export function ReportFolders({ companyId }: Props) {
   const [crumb, setCrumb] = useState<Crumb>({ level: "root" });
   const [emailingReportId, setEmailingReportId] = useState<string | null>(null);
   const [movingReport, setMovingReport] = useState<SerializedReportEntry | null>(null);
+  const [renamingReport, setRenamingReport] = useState<SerializedReportEntry | null>(null);
   const [busyReportId, setBusyReportId] = useState<string | null>(null);
 
   const loadFolders = () => {
@@ -182,7 +184,14 @@ export function ReportFolders({ companyId }: Props) {
       className="flex flex-col gap-2 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between"
     >
       <div className="min-w-0">
-        <p className="font-medium truncate">{getReportLabel(report.reportType)}</p>
+        {report.reportName ? (
+          <>
+            <p className="font-medium truncate">{report.reportName}</p>
+            <p className="text-xs text-muted-foreground">{getReportLabel(report.reportType)}</p>
+          </>
+        ) : (
+          <p className="font-medium truncate">{getReportLabel(report.reportType)}</p>
+        )}
         <p className="text-xs text-muted-foreground">
           {/* reportDate es un valor de solo fecha ("YYYY-MM-DD") - formatDate
               lo ancla al día calendario correcto (ver su propio comentario en
@@ -225,6 +234,10 @@ export function ReportFolders({ companyId }: Props) {
               Corregir
             </Button>
           )}
+          <Button size="sm" variant="outline" onClick={() => setRenamingReport(report)}>
+            <Tag className="mr-2 h-4 w-4" />
+            {report.reportName ? "Renombrar" : "Ponerle nombre"}
+          </Button>
           {canMove && (
             <Button size="sm" variant="outline" onClick={() => setMovingReport(report)}>
               <FolderInput className="mr-2 h-4 w-4" />
@@ -442,6 +455,19 @@ export function ReportFolders({ companyId }: Props) {
             // así que se vuelve a la raíz en vez de mostrar una carpeta que
             // podría quedar vacía o con el conteo desactualizado.
             setCrumb({ level: "root" });
+            loadFolders();
+          }}
+        />
+      )}
+      {renamingReport && (
+        <NameReportModal
+          reportId={renamingReport.id}
+          suggestedName={renamingReport.reportName ?? ""}
+          onClose={() => {
+            // Renombrar no cambia proyecto ni año/mes - el informe se queda
+            // en la misma carpeta, así que basta con refrescar los datos
+            // (para que el nuevo nombre se vea) sin volver a la raíz.
+            setRenamingReport(null);
             loadFolders();
           }}
         />

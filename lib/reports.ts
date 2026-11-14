@@ -43,6 +43,10 @@ export type GeneratedReport = {
   // - null si no se vinculó o si el informe es anterior a esa columna. Ver
   // lib/reports/report-folders.ts para cómo se usa en la vista de carpetas.
   projectId?: string | null;
+  // Nombre propio puesto justo después de generar el informe (migración
+  // 049, components/name-report-modal.tsx) - null si se omitió o si el
+  // informe es anterior a esa función.
+  reportName?: string | null;
 };
 
 export type ReportFilters = {

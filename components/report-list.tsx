@@ -117,6 +117,7 @@ export function ReportList({ companyId }: Props) {
     createdAt: (row.created_at ?? row.createdAt ?? new Date().toISOString()) as string,
     updatedAt: (row.updated_at ?? row.updatedAt ?? row.created_at ?? new Date().toISOString()) as string,
     reportMetadata: (row.report_metadata ?? undefined) as Record<string, unknown> | undefined,
+    reportName: (row.report_name ?? null) as string | null,
   });
 
   // Informes técnicos generados antes de que existiera "Corregir" (antes del
@@ -258,7 +259,16 @@ export function ReportList({ companyId }: Props) {
             <TableBody>
               {reports.map((report) => (
                 <TableRow key={report.id}>
-                  <TableCell className="font-medium">{getReportLabel(report)}</TableCell>
+                  <TableCell className="font-medium">
+                    {report.reportName ? (
+                      <div>
+                        <p>{report.reportName}</p>
+                        <p className="text-xs font-normal text-muted-foreground">{getReportLabel(report)}</p>
+                      </div>
+                    ) : (
+                      getReportLabel(report)
+                    )}
+                  </TableCell>
                   <TableCell>{report.fileFormat === "EXCEL" ? "Excel" : report.fileFormat}</TableCell>
                   <TableCell>{getStatusBadge(report.status)}</TableCell>
                   <TableCell className="text-right">{report.rowCount}</TableCell>

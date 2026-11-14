@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { getTenantContext } from '@/lib/tenant';
-import { assertSameOrigin, assertRateLimit } from '@/lib/security';
+import { assertSameOrigin, assertRateLimit, sanitizeText } from '@/lib/security';
 import { buildReportFolderTree, type FolderReportInput } from '@/lib/reports/report-folders';
 
 export type SerializedReportEntry = {
@@ -25,6 +25,11 @@ export type SerializedReportEntry = {
   projectId: string | null;
   folderYear: number | null;
   folderMonth: number | null;
+  // Nombre propio del informe (migración 049) - se pide justo después de
+  // generarlo (ver components/technical-report-form.tsx) para poder
+  // identificarlo luego dentro de una carpeta. null en informes que nunca
+  // lo recibieron (todos los históricos, y cualquiera que se haya omitido).
+  reportName: string | null;
 };
 
 export type SerializedYearMonth = { year: number; month: number; reports: SerializedReportEntry[] };
@@ -66,6 +71,7 @@ function toEntry(row: {
   project_id: string | null;
   folder_year: number | null;
   folder_month: number | null;
+  report_name: string | null;
 }): SerializedReportEntry {
   const metadata = (row.report_metadata || {}) as Record<string, unknown>;
   const formPayload = (metadata.formPayload || {}) as Record<string, unknown>;
@@ -82,6 +88,7 @@ function toEntry(row: {
     projectId: row.project_id,
     folderYear: row.folder_year,
     folderMonth: row.folder_month,
+    reportName: row.report_name,
   };
 }
 
@@ -112,7 +119,7 @@ export async function getReportFolders(): Promise<ReportFoldersResult> {
 
     const { data: rows, error } = await supabase
       .from('generated_reports')
-      .select('id, report_type, report_format, status, created_at, file_size_bytes, record_count, project_id, report_metadata, folder_year, folder_month')
+      .select('id, report_type, report_format, status, created_at, file_size_bytes, record_count, project_id, report_metadata, folder_year, folder_month, report_name')
       .eq('company_id', tenant.companyId)
       .order('created_at', { ascending: false });
 
@@ -332,5 +339,64 @@ export async function moveReportToFolder(
   } catch (error) {
     console.error('MOVE_REPORT_TO_FOLDER_UNEXPECTED_ERROR', error);
     return { success: false, error: 'No fue posible mover el informe.' };
+  }
+}
+
+/**
+ * Le pone (o le cambia) un nombre propio a un informe ya generado -
+ * components/technical-report-form.tsx lo llama justo después de que
+ * generateTechnicalReport termina con éxito, y components/report-folders.tsx
+ * lo reutiliza para poder renombrar un informe más tarde desde la carpeta.
+ * No está restringido a ADMIN/SUPERVISOR como moveReportToFolder: nombrar el
+ * informe que uno mismo acaba de crear es parte de terminarlo, no una
+ * reclasificación administrativa - la misma política RLS
+ * (can_register_operations) que ya permite crear el informe permite esto.
+ *
+ * reportId se valida contra tenant.companyId antes de tocar nada, igual que
+ * el resto de las acciones de esta misma familia - nunca se confía en que el
+ * id recibido ya pertenezca a esta empresa.
+ */
+export async function renameReport(
+  reportId: string,
+  name: string
+): Promise<{ success: true } | { success: false; error: string }> {
+  try {
+    await assertSameOrigin();
+    await assertRateLimit('renameReport', 30);
+
+    const tenant = await getTenantContext();
+    const supabase = await createClient();
+
+    const cleanName = sanitizeText(name, 150);
+
+    const { data: existing, error: fetchError } = await supabase
+      .from('generated_reports')
+      .select('id')
+      .eq('id', reportId)
+      .eq('company_id', tenant.companyId)
+      .maybeSingle();
+    if (fetchError || !existing) {
+      return { success: false, error: 'No se encontró el informe.' };
+    }
+
+    const { error: updateError } = await supabase
+      .from('generated_reports')
+      // Vacío (el usuario borró el campo y guardó así, o pulsó "Omitir") se
+      // guarda como null, no como cadena vacía - para que el resto del
+      // código (toEntry, las vistas) solo tenga que comprobar
+      // "tiene nombre o no" sin distinguir dos formas distintas de "no".
+      .update({ report_name: cleanName || null })
+      .eq('id', reportId)
+      .eq('company_id', tenant.companyId);
+
+    if (updateError) {
+      console.error('RENAME_REPORT_ERROR', updateError);
+      return { success: false, error: 'No fue posible guardar el nombre.' };
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('RENAME_REPORT_UNEXPECTED_ERROR', error);
+    return { success: false, error: 'No fue posible guardar el nombre.' };
   }
 }

@@ -20,6 +20,7 @@ import { useConnectivity } from "@/lib/offline/connectivity";
 import { useOffline } from "@/components/offline-provider";
 import { getOfflineDb, type QueueFile } from "@/lib/offline/db";
 import { hasPendingEvidenceUploads, selectEvidencePhotosToSubmit } from "@/lib/reports/technical-evidence";
+import { NameReportModal } from "@/components/name-report-modal";
 
 type Props = {
   companyId: string;
@@ -313,6 +314,11 @@ export function TechnicalReportForm({ companyId, editReportId }: Props) {
   const [draftRestoredNotice, setDraftRestoredNotice] = useState(false);
   const [editLoadError, setEditLoadError] = useState<string | null>(null);
   const [signatureRestore, setSignatureRestore] = useState<Record<string, string>>({});
+  // Se abre justo después de generar un informe en línea (ver handleSubmit)
+  // para pedir el nombre con el que se va a reconocer dentro de una carpeta
+  // - null significa "cerrado", nunca hay dos abiertos a la vez porque el
+  // formulario solo puede estar generando un informe por vez.
+  const [namingReportId, setNamingReportId] = useState<{ id: string; suggestedName: string } | null>(null);
   // SignaturePad guarda el trazo dibujado solo en su propio estado interno,
   // sin ninguna forma externa de "limpiarlo" - cambiar su `key` fuerza a
   // React a desmontar y volver a montar el componente desde cero después de
@@ -832,6 +838,11 @@ export function TechnicalReportForm({ companyId, editReportId }: Props) {
       const result = await generateTechnicalReport(formData);
       if (result.success) {
         setMessage(result.message || "Informe técnico generado correctamente.");
+        // Se captura ANTES de limpiar el formulario (justo abajo) - es solo
+        // una sugerencia de arranque para el modal de nombre, nunca se
+        // guarda sola ni bloquea el reset que evita resucitar un borrador
+        // fantasma (ver el comentario de clearDraft más abajo).
+        const suggestedName = formState.clientName;
         await clearDraft();
         // Sin este reset, el autoguardado (corre cada 2s sin importar qué
         // disparó el render) vería el formulario todavía lleno con lo que se
@@ -844,6 +855,13 @@ export function TechnicalReportForm({ companyId, editReportId }: Props) {
         setSignatureRestore({});
         setFormResetCounter((n) => n + 1);
         formRef.current?.reset();
+        // Pedido real de Progrúas: sin un nombre propio, el informe se ve
+        // dentro de una carpeta (lib/reports/report-folders.ts) solo como
+        // "Informe técnico", indistinguible de los demás del mismo mes. Se
+        // pide de inmediato, como una capa aparte sobre el formulario ya
+        // limpio - no bloquea el reset de arriba ni la posibilidad de
+        // seguir usando el formulario mientras el modal está abierto.
+        if (result.reportId) setNamingReportId({ id: result.reportId, suggestedName });
       } else {
         setError(result.error || "No fue posible generar el informe técnico.");
       }
@@ -1208,6 +1226,14 @@ export function TechnicalReportForm({ companyId, editReportId }: Props) {
           <p>• Sin conexión, puedes completar todo (datos, fotos, firmas) y quedará &quot;Pendiente de generación&quot; hasta que vuelva Internet.</p>
         </CardContent>
       </Card>
+
+      {namingReportId && (
+        <NameReportModal
+          reportId={namingReportId.id}
+          suggestedName={namingReportId.suggestedName}
+          onClose={() => setNamingReportId(null)}
+        />
+      )}
     </div>
   );
 }
